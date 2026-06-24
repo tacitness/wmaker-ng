@@ -62,4 +62,7 @@ Dependency direction is strictly **ai → ng → shared → (runtime) core**.
 ## Packaging
 
 `nfpm` recipes in `packaging/nfpm/` produce deb/rpm/apk for the `wmaker-ng` and
-`wmaker-ai` packages, published to `repos.tacitsoft.dev`. See `make packages`.
+`wmaker-ai` packages across {glibc(EL9 floor), musl} × {amd64, arm64}, published
+signed to `repos.tacitsoft.dev`. The tag-driven pipeline, target matrix, and
+required CI secrets are documented in [RELEASING.md](RELEASING.md). See
+`make packages` / `make release-local` for local builds.

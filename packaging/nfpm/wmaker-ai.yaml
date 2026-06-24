@@ -1,9 +1,9 @@
 # nfpm recipe — wmaker-ai package (Layer 3: the MCP AI control plane).
-# Depends on wmaker-ng; adds the model-agnostic MCP server. Build via the same
-# `make package-*` targets. Skeleton only — `contents` land with the ai-mcp
-# skeleton (PLAN §8, Week 2+).
+#
+# Driven by the same env vars as wmaker-ng.yaml (PKG_VERSION / PKG_ARCH /
+# WMNG_STAGE) and the same signing keys. Depends on wmaker-ng.
 name: wmaker-ai
-arch: amd64
+arch: ${PKG_ARCH}
 platform: linux
 version: ${PKG_VERSION}
 section: x11
@@ -22,16 +22,8 @@ depends:
   - wmaker-ng
 
 contents:
-  - src: ../../target/release/ai-mcp
+  - src: ${WMNG_STAGE}/ai-mcp
     dst: /usr/bin/ai-mcp
 
-overrides:
-  apk:
-    depends:
-      - wmaker-ng
-  deb:
-    depends:
-      - wmaker-ng
-  rpm:
-    depends:
-      - wmaker-ng
+# Signing is applied at the repo-assembly layer (see scripts/repo.sh), so the
+# recipe is identical for local (unsigned) and release (signed) runs.

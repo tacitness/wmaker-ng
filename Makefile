@@ -102,27 +102,67 @@ install-dev-tools: ## Install cargo-audit + cargo-deny locally
 	$(CARGO) install cargo-audit --locked
 	$(CARGO) install cargo-deny --locked
 
+.PHONY: install-cross-tools
+install-cross-tools: ## Install the cross-build toolchain (cargo-zigbuild; needs zig on PATH)
+	$(CARGO) install cargo-zigbuild --locked
+	@echo "Also install zig (https://ziglang.org) and 'go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest'"
+
 .PHONY: setup
 setup: install-dev-tools hooks ## Bootstrap local dev tools + git hooks
 
-# ── Packaging (nfpm → deb/rpm/apk → repos.tacitsoft.dev) ──────────────────────
-.PHONY: package-deb package-rpm package-apk packages
-package-deb: ## Build .deb packages via nfpm
-	@mkdir -p $(DIST_DIR)
-	nfpm package --config $(PKG_DIR)/wmaker-ng.yaml --packager deb --target $(DIST_DIR)
-	nfpm package --config $(PKG_DIR)/wmaker-ai.yaml --packager deb --target $(DIST_DIR)
+# ── Cross-build matrix (cargo-zigbuild) ───────────────────────────────────────
+# glibc binaries are pinned to the EL9 floor (glibc 2.34) so one build runs on
+# EL9/EL10, Fedora, Debian 12/13, Ubuntu 22.04/24.04. musl binaries are static
+# (Alpine + anywhere). Two libc × two arch = four binary sets.
+GNU_FLOOR := 2.34
 
-package-rpm: ## Build .rpm packages via nfpm
-	@mkdir -p $(DIST_DIR)
-	nfpm package --config $(PKG_DIR)/wmaker-ng.yaml --packager rpm --target $(DIST_DIR)
-	nfpm package --config $(PKG_DIR)/wmaker-ai.yaml --packager rpm --target $(DIST_DIR)
+.PHONY: build-amd64-gnu build-arm64-gnu build-amd64-musl build-arm64-musl cross-build
+build-amd64-gnu:  ## Cross-build glibc/x86_64 binaries (EL9 floor)
+	scripts/build.sh x86_64-unknown-linux-gnu.$(GNU_FLOOR)  amd64-gnu
+build-arm64-gnu:  ## Cross-build glibc/aarch64 binaries (EL9 floor)
+	scripts/build.sh aarch64-unknown-linux-gnu.$(GNU_FLOOR) arm64-gnu
+build-amd64-musl: ## Cross-build musl-static/x86_64 binaries
+	scripts/build.sh x86_64-unknown-linux-musl  amd64-musl
+build-arm64-musl: ## Cross-build musl-static/aarch64 binaries
+	scripts/build.sh aarch64-unknown-linux-musl arm64-musl
+cross-build: build-amd64-gnu build-arm64-gnu build-amd64-musl build-arm64-musl ## Build the full matrix
 
-package-apk: ## Build .apk packages via nfpm
-	@mkdir -p $(DIST_DIR)
-	nfpm package --config $(PKG_DIR)/wmaker-ng.yaml --packager apk --target $(DIST_DIR)
-	nfpm package --config $(PKG_DIR)/wmaker-ai.yaml --packager apk --target $(DIST_DIR)
+# ── Packaging (nfpm → deb/rpm/apk) ────────────────────────────────────────────
+# deb/rpm come from the glibc stage; apk from the musl stage.
+.PHONY: packages
+packages: ## Build deb+rpm (glibc) and apk (musl) for both arches → dist/pkg
+	scripts/package.sh deb amd64 amd64-gnu
+	scripts/package.sh rpm amd64 amd64-gnu
+	scripts/package.sh deb arm64 arm64-gnu
+	scripts/package.sh rpm arm64 arm64-gnu
+	scripts/package.sh apk amd64 amd64-musl
+	scripts/package.sh apk arm64 arm64-musl
 
-packages: package-deb package-rpm package-apk ## Build all package formats
+.PHONY: tarballs
+tarballs: ## Package staged binaries into portable tarballs → dist/tarballs
+	scripts/tarball.sh amd64 gnu  amd64-gnu
+	scripts/tarball.sh arm64 gnu  arm64-gnu
+	scripts/tarball.sh amd64 musl amd64-musl
+	scripts/tarball.sh arm64 musl arm64-musl
+
+# ── Repository assembly + signing ─────────────────────────────────────────────
+# Signing is keyed off GPG_KEY_ID (apt/rpm) and ABUILD_KEY (apk); unset = local
+# unsigned build. apk assembly needs an Alpine host (apk + abuild-sign).
+.PHONY: repo-apt repo-rpm repo-apk repos
+repo-apt: ## Assemble (and sign) the APT repo → dist/repo/apt
+	scripts/repo-apt.sh $(DIST_DIR)/repo/apt $(DIST_DIR)/pkg
+repo-rpm: ## Assemble (and sign) the RPM repo → dist/repo/rpm
+	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm $(DIST_DIR)/pkg
+repo-apk: ## Assemble (and sign) the APK repo → dist/repo/apk (Alpine only)
+	scripts/repo-apk.sh $(DIST_DIR)/repo/apk $(DIST_DIR)/pkg
+repos: repo-apt repo-rpm repo-apk ## Assemble all repositories
+
+.PHONY: publish
+publish: ## rsync the assembled repos → repos.tacitsoft.dev (needs deploy key)
+	scripts/publish.sh $(DIST_DIR)/repo
+
+.PHONY: release-local
+release-local: cross-build packages tarballs ## Full release build, no publish (CI parity sans signing)
 
 # ── Release (tag-only versioning) ─────────────────────────────────────────────
 _VER_MAJOR := $(shell echo $(_BASE_VER) | cut -d. -f1)

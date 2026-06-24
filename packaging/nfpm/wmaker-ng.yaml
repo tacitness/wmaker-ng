@@ -1,10 +1,15 @@
 # nfpm recipe — wmaker-ng package (Layer 2: modern Linux integration, no AI).
-# Build: `make package-deb | package-rpm | package-apk` (PKG_VERSION is exported
-# from the git tag by the Makefile — versioning never lives in this file).
-# Skeleton only: the `contents` point at release-build outputs that land once the
-# daemons are implemented (PLAN §8, Week 2+).
+#
+# One recipe, many targets. The Makefile drives the matrix by exporting:
+#   PKG_VERSION  — semver derived from the git tag (never written here)
+#   PKG_ARCH     — nfpm arch: amd64 | arm64 (nfpm maps to each packager's name)
+#   WMNG_STAGE   — dir holding the compiled binaries for this arch+libc
+# and invoking `nfpm package --packager {deb,rpm,apk}`.
+#
+# glibc binaries (built against the EL9 floor, glibc 2.34) feed deb + rpm;
+# musl-static binaries feed apk. Same recipe either way.
 name: wmaker-ng
-arch: amd64
+arch: ${PKG_ARCH}
 platform: linux
 version: ${PKG_VERSION}
 section: x11
@@ -19,22 +24,22 @@ vendor: TacitSoft
 homepage: https://windowmaker.org
 license: GPL-2.0-or-later
 
-# Suggests the window manager itself; does not hard-require a packaged core yet.
+# The daemons react to these services but degrade gracefully without them, so
+# they are weak deps, not hard requirements. (apk has no "recommends" concept.)
 recommends:
-  - wmaker
+  - udisks2
+  - upower
 
 contents:
-  - src: ../../target/release/ng-automount
+  - src: ${WMNG_STAGE}/ng-automount
     dst: /usr/bin/ng-automount
-  - src: ../../target/release/ng-power
+  - src: ${WMNG_STAGE}/ng-power
     dst: /usr/bin/ng-power
-  - src: ../../target/release/ng-notify
+  - src: ${WMNG_STAGE}/ng-notify
     dst: /usr/bin/ng-notify
 
-overrides:
-  apk:
-    depends: []
-  deb:
-    depends: []
-  rpm:
-    depends: []
+# Signing is applied at the repo-assembly layer, not here (see scripts/repo.sh):
+#   apt  — GPG-signed InRelease + Release.gpg
+#   rpm  — GPG-signed packages (rpm --addsign) + signed repomd.xml
+#   apk  — RSA-signed APKINDEX (abuild-sign)
+# This keeps the recipe identical for local (unsigned) and release (signed) runs.

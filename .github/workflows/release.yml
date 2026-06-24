@@ -1,0 +1,142 @@
+name: Release
+
+# Tag-driven, like tsctl: `make bump-patch|minor|major` pushes a v* tag → this
+# runs. Version lives ONLY in the tag. All third-party Actions are pinned by
+# commit SHA with a version comment.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub Release + upload artifacts
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── 1. Cross-build the matrix: {glibc(EL9 floor), musl} × {amd64, arm64} ─────
+  build:
+    name: Build ${{ matrix.stage }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu.2.34, stage: amd64-gnu, arch: amd64, libc: gnu }
+          - { target: aarch64-unknown-linux-gnu.2.34, stage: arm64-gnu, arch: arm64, libc: gnu }
+          - { target: x86_64-unknown-linux-musl, stage: amd64-musl, arch: amd64, libc: musl }
+          - { target: aarch64-unknown-linux-musl, stage: arm64-musl, arch: arm64, libc: musl }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # tags needed for version derivation
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+      - uses: mlugg/setup-zig@8d6198c65fb0feaa111df26e6b467fea8345e46f # v2.0.5
+      - uses: taiki-e/install-action@81ee1d48d9194cdcab880cbdc7d36e87d39874cb # v2.62.45
+        with:
+          tool: cargo-zigbuild
+      - name: Derive version from tag
+        run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Cross-build
+        run: scripts/build.sh ${{ matrix.target }} ${{ matrix.stage }}
+      - name: Tarball
+        run: scripts/tarball.sh ${{ matrix.arch }} ${{ matrix.libc }} ${{ matrix.stage }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-${{ matrix.stage }}
+          path: dist/
+          retention-days: 7
+
+  # ── 2. Package: deb/rpm (glibc) + apk (musl) for both arches via nfpm ─────────
+  packages:
+    name: Package (deb/rpm/apk)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: dist-*
+          path: dist/
+          merge-multiple: true
+      - uses: taiki-e/install-action@81ee1d48d9194cdcab880cbdc7d36e87d39874cb # v2.62.45
+        with:
+          tool: nfpm
+      - name: Install envsubst
+        run: sudo apt-get update && sudo apt-get install -y gettext-base
+      - name: Derive version from tag
+        run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Build packages
+        run: make packages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packages
+          path: dist/pkg/
+          retention-days: 7
+
+  # ── 3. Assemble + sign repos, publish, and cut the GitHub Release ────────────
+  release:
+    name: Sign, publish & release
+    needs: packages
+    runs-on: ubuntu-latest
+    env:
+      # Map secrets to booleans so steps can gate on presence (tsctl pattern):
+      # the pipeline is green before ops provisions keys; it hardens once they do.
+      HAS_GPG: ${{ secrets.REPO_GPG_PRIVATE_KEY != '' && secrets.REPO_GPG_KEY_ID != '' }}
+      HAS_APK: ${{ secrets.APK_SIGNING_KEY != '' }}
+      HAS_DEPLOY: ${{ secrets.REPOS_DEPLOY_SSH_KEY != '' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: dist-*
+          path: dist/
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: packages
+          path: dist/pkg/
+      - name: Install repo tooling
+        run: sudo apt-get update && sudo apt-get install -y reprepro createrepo-c rpm gnupg
+
+      - name: Import GPG signing key
+        if: env.HAS_GPG == 'true'
+        run: |
+          echo "${{ secrets.REPO_GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "GPG_KEY_ID=${{ secrets.REPO_GPG_KEY_ID }}" >> "$GITHUB_ENV"
+
+      - name: Assemble apt + rpm repos
+        run: make repo-apt repo-rpm
+
+      - name: Assemble apk repo (Alpine container)
+        run: |
+          KEYENV=""
+          if [ "$HAS_APK" = "true" ]; then
+            mkdir -p dist/.keys
+            echo "${{ secrets.APK_SIGNING_KEY }}" > dist/.keys/wmaker-ng.rsa
+            chmod 600 dist/.keys/wmaker-ng.rsa
+            KEYENV="-e ABUILD_KEY=/w/dist/.keys/wmaker-ng.rsa"
+          fi
+          docker run --rm -v "$PWD:/w" -w /w $KEYENV alpine:3.22 sh -c \
+            'apk add --no-cache bash abuild >/dev/null && bash scripts/repo-apk.sh dist/repo/apk dist/pkg'
+
+      - name: Publish repos to repos.tacitsoft.dev
+        if: env.HAS_DEPLOY == 'true'
+        uses: webfactory/ssh-agent@a6f90b1f127823b31d4d4a8d96047790581349bd # v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.REPOS_DEPLOY_SSH_KEY }}
+      - name: rsync publish
+        if: env.HAS_DEPLOY == 'true'
+        run: scripts/publish.sh dist/repo
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/tarballs/* dist/pkg/*

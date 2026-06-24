@@ -9,17 +9,23 @@ facets:
 
 The `wmaker` C core ships from its own repository (`tacitness/wmaker`).
 
+One recipe per package serves every target — the Makefile drives the matrix by
+exporting `PKG_VERSION` / `PKG_ARCH` / `WMNG_STAGE` and rendering with
+`envsubst` before calling `nfpm` (see `scripts/package.sh`).
+
 ## Build
 
 ```bash
-make release        # build optimized binaries into target/release/
-make package-deb    # → dist/*.deb   (also: package-rpm, package-apk)
-make packages       # all three formats
+make cross-build     # glibc(EL9 floor) + musl static, amd64 + arm64
+make packages        # → dist/pkg/*.{deb,rpm,apk}  (deb/rpm from glibc, apk from musl)
+make release-local   # cross-build + packages + tarballs, no signing/publish
 ```
 
 Versioning comes from the git tag via the Makefile (`PKG_VERSION`); it is never
-written into the nfpm recipes. This directory is a **skeleton** — the recipes
-reference binaries that land as the daemons are implemented (PLAN §8).
+written into the recipes. The full tag → signed multi-arch repos flow, the
+target matrix, required CI secrets, and consumer install instructions live in
+[../RELEASING.md](../RELEASING.md). This is still a **skeleton** — the recipes
+package binaries that gain behavior as the daemons are implemented (PLAN §8).
 
-Requires [`nfpm`](https://nfpm.goreleaser.com): `go install
-github.com/goreleaser/nfpm/v2/cmd/nfpm@latest`.
+Requires [`nfpm`](https://nfpm.goreleaser.com) and `cargo-zigbuild` + `zig`:
+see `make install-cross-tools`.

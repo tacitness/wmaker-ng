@@ -27,9 +27,12 @@ ml/.mypy_cache/
 .vscode/*
 !.vscode/extensions.json
 
-# ── Secrets — never commit ───────────────────────────────────────────────────
+# ── Secrets / signing keys — never commit ────────────────────────────────────
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+*.rsa
+*.gpg
+*-private.asc
