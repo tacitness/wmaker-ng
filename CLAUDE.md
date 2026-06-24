@@ -6,7 +6,7 @@ architecture map, and [ARCHITECTURE.md](ARCHITECTURE.md) for layer detail.
 
 ## Key rules
 
-- **The C core is sacred and lives elsewhere** (`tacitness/wmaker`). Nothing here
+- **The C core is sacred and lives elsewhere** (`tacitness/wmaker-crm`). Nothing here
   compile-links against it; layers are decoupled at runtime (D-Bus / EWMH / MCP).
 - **Lightweight is the product.** Out-of-process, event-driven, idle-until-poked.
   Never put synchronous D-Bus or capture work in a hot loop.

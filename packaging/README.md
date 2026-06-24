@@ -7,7 +7,7 @@ facets:
 - **`wmaker-ng`** — the `ng-*` daemons (auto-mount, power, notify).
 - **`wmaker-ai`** — the `ai-mcp` server; `depends:` on `wmaker-ng`.
 
-The `wmaker` C core ships from its own repository (`tacitness/wmaker`).
+The `wmaker` C core ships from its own repository (`tacitness/wmaker-crm`).
 
 One recipe per package serves every target — the Makefile drives the matrix by
 exporting `PKG_VERSION` / `PKG_ARCH` / `WMNG_STAGE` and rendering with

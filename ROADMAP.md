@@ -4,7 +4,7 @@ Mirror of [PLAN.md](PLAN.md) §8, kept beside the code as a checklist. PLAN.md
 remains the source of truth until superseded by code + ARCHITECTURE.md.
 
 ## Week 1 — Foundation
-- [ ] Create `tacitness/wmaker` C fork; wire `upstream`/`origin`; CI proving the
+- [ ] Create `tacitness/wmaker-crm` C fork; wire `upstream`/`origin`; CI proving the
       core still builds. *(separate C repo — see PLAN §2)*
 - [x] Scaffold this Cargo workspace, `.githooks`, CI/CD, lint/format/audit
       gating, `AGENTS.md`/`CLAUDE.md`, Makefile.

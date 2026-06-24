@@ -29,7 +29,7 @@ Dependency direction: **ai → ng → core.** You can run ng with zero AI footpr
 ## 2. Repository topology
 
 ```
-repo.or.cz/wmaker-crm  --upstream-->  tacitness/wmaker      (C core, rebasable)
+repo.or.cz/wmaker-crm  --upstream-->  tacitness/wmaker-crm      (C core, rebasable)
                                              |  runtime deps only (D-Bus/EWMH/MCP)
                                              v
                                    tacitness/wmaker-ng       (Rust workspace + ml/)
@@ -40,7 +40,7 @@ repo.or.cz/wmaker-crm  --upstream-->  tacitness/wmaker      (C core, rebasable)
 
 **Two repositories, deliberately:**
 
-- **`tacitness/wmaker`** — the C fork. The *only* thing that rebases on
+- **`tacitness/wmaker-crm`** — the C fork. The *only* thing that rebases on
   `repo.or.cz`. Isolated so its history is "upstream + a small patch series" and
   nothing else; rebases never churn Rust history.
 - **`tacitness/wmaker-ng`** (this repo) — one Cargo workspace holding **both** the
@@ -51,7 +51,7 @@ Remotes on the C fork:
 
 ```
 upstream  git://repo.or.cz/wmaker-crm.git   (fetch only; push disabled)
-origin    git@github.com:tacitness/wmaker.git
+origin    git@github.com:tacitness/wmaker-crm.git
 # later: gitea remote added, origin re-pointed — a one-line migration checklist item
 ```
 
@@ -100,7 +100,7 @@ wmaker-ng/                         # Cargo workspace
 │  ├─ ng-notify/                  # bin: org.freedesktop.Notifications-> wmaker-ng
 │  ├─ ai-mcp/                     # bin: MCP server (the heart)       -> wmaker-ai
 │  └─ ai-proto/                   # lib: screen-diff protocol + codec -> wmaker-ai
-├─ core-patches/                   # MIRROR of the few C seams (canonical copy in tacitness/wmaker)
+├─ core-patches/                   # MIRROR of the few C seams (canonical copy in tacitness/wmaker-crm)
 ├─ ml/                             # Python (uv): Phase-4 model/distillation tooling
 ├─ packaging/                      # nfpm recipes -> deb/rpm/apk (+ brew) -> repos.tacitsoft.dev
 ├─ .githooks/                      # pre-commit, pre-push (house style: tsctl)
@@ -114,7 +114,7 @@ wmaker-ng/                         # Cargo workspace
 
 ## 5. Layer specifications
 
-### Layer 1 — Core (C, `tacitness/wmaker`)
+### Layer 1 — Core (C, `tacitness/wmaker-crm`)
 - Tracked pristine against `repo.or.cz/wmaker-crm`.
 - Permitted edits: a **small, documented, upstream-bound patch series** only —
   ideally single hook-point seams that dispatch into our files.
@@ -205,7 +205,7 @@ validated. Lives in `ml/`.
 ## 8. One-month roadmap
 
 **Week 1 — Foundation**
-1. Create `tacitness/wmaker` C fork; wire `upstream`/`origin`; CI proving the
+1. Create `tacitness/wmaker-crm` C fork; wire `upstream`/`origin`; CI proving the
    core still builds. *(wmaker-ng repo + this plan: done.)*
 2. Scaffold the Cargo workspace, `.githooks`, CI/CD, lint/format/audit gating,
    `AGENTS.md`/`CLAUDE.md`, Makefile.
@@ -235,5 +235,5 @@ Gitea migration (mechanical when ready).
 - Final license per layer (provisional: GPL-2.0-or-later for lineage).
 - Dockapp vs. tray surface for `ng-automount`.
 - MCP transport: stdio vs. socket for the sandbox.
-- Whether `core-patches/` is the canonical copy or a mirror of `tacitness/wmaker`
+- Whether `core-patches/` is the canonical copy or a mirror of `tacitness/wmaker-crm`
   (current plan: canonical in the C repo, mirrored here for reference).

@@ -1,7 +1,7 @@
 # core-patches/
 
 **Mirror, not canonical.** The few C seams into the Window Maker core live in
-the separate `tacitness/wmaker` repository (rebased on
+the separate `tacitness/wmaker-crm` repository (rebased on
 `repo.or.cz/wmaker-crm`). This directory holds a *read-only reference copy* of
 that small, documented, upstream-bound patch series so the runtime contract is
 visible alongside the Rust companions.

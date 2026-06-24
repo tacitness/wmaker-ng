@@ -7,7 +7,7 @@ layer detail in [ARCHITECTURE.md](ARCHITECTURE.md)). It holds both facets —
 plus the `ml/` Python tooling for Phase 4.
 
 The C window-manager core lives in a **separate** repository
-(`tacitness/wmaker`, rebased on `repo.or.cz/wmaker-crm`). Do not vendor or edit
+(`tacitness/wmaker-crm`, rebased on `repo.or.cz/wmaker-crm`). Do not vendor or edit
 core C here; the layers are decoupled at runtime (D-Bus / EWMH / MCP).
 
 ## Rules

@@ -17,8 +17,8 @@
 |  automount(udisks2) · power(logind/upower) · notify · dockapps |
 |  D-Bus to the system, EWMH to the WM — zero core changes       |
 +---------------------------------------------------------------+
-|  Layer 1 — Window Maker core   (C, tacitness/wmaker, pristine)|
-|  rebased on repo.or.cz · only tiny hooked seams + tiling       |
+|  Layer 1 — Window Maker (C, tacitness/wmaker-crm, pristine)   |
+|  rebased on repo.or.cz · only tiny hooked seams + tiling      |
 +---------------------------------------------------------------+
 ```
 
@@ -44,7 +44,7 @@ crates/
 Three shared libraries form the seam; five binaries/libraries build on top.
 `wmng-*` carry no `main`; the daemons are the only entry points.
 
-## 3. Layer 1 — Core (C, `tacitness/wmaker`)
+## 3. Layer 1 — Core (C, `tacitness/wmaker-crm`)
 
 Not in this repository. Tracked pristine against `repo.or.cz/wmaker-crm` with a
 small, documented, upstream-bound patch series. First core feature: **tiling

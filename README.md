@@ -105,7 +105,7 @@ the first proof-of-concept companion — follows.
 Repository topology
 ===================
 
-    repo.or.cz/wmaker-crm  --upstream-->  tacitness/wmaker      (C core, rebasable)
+    repo.or.cz/wmaker-crm  --upstream-->  tacitness/wmaker-crm      (C core, rebasable)
                                                  |  runtime deps only
                                                  v  (D-Bus / EWMH / MCP)
                                        tacitness/wmaker-ng       (Rust: ng + ai)
