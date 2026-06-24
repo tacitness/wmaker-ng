@@ -1,0 +1,70 @@
+# ============================================================================
+# wmaker-ng — Cargo workspace
+# ----------------------------------------------------------------------------
+# Holds BOTH facets of the modernization (PLAN §2):
+#   ng-*  -> wmaker-ng package  (modern Linux integration, no AI)
+#   ai-*  -> wmaker-ai package  (MCP control plane)
+# Shared wmng-* crates are the seam both facets compile against.
+#
+# House style (PLAN §7): latest, non-deprecated dependencies only; versions
+# live ONLY in git tags and are injected at build time by the Makefile.
+# ============================================================================
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/wmng-x11",
+    "crates/wmng-dbus",
+    "crates/wmng-ewmh",
+    "crates/ng-automount",
+    "crates/ng-power",
+    "crates/ng-notify",
+    "crates/ai-mcp",
+    "crates/ai-proto",
+]
+
+[workspace.package]
+version = "0.0.0"            # placeholder — real version injected from git tags
+edition = "2024"
+rust-version = "1.85"
+license = "GPL-2.0-or-later" # provisional, per PLAN §9 / README
+repository = "https://github.com/tacitness/wmaker-ng"
+authors = ["The wmaker-ng Team"]
+publish = false             # shipped via nfpm (repos.tacitsoft.dev), not crates.io
+
+# ── Shared dependency versions ──────────────────────────────────────────────
+# Declared once here; each crate opts in with `dep.workspace = true`.
+# Pinned to the latest stable, non-deprecated release verified at scaffold time.
+[workspace.dependencies]
+# X11 extensions: pure-Rust XCB. Per-crate features select the extensions used
+# (XDamage / XTEST / XShm / XFixes) — see PLAN §5/§6.
+x11rb = { version = "0.13.2", default-features = false }
+
+# D-Bus client (udisks2 / logind / upower) over the tokio reactor — PLAN §5.
+zbus = { version = "5.16.0", default-features = false, features = ["tokio"] }
+
+# Model Context Protocol server runtime — the heart of wmaker-ai (PLAN §5).
+rmcp = { version = "1.8.0", default-features = false }
+
+# Async runtime for the event-driven companions.
+tokio = { version = "1.52.3", default-features = false }
+
+# Serialization for the MCP tool schemas and the screen-diff protocol.
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
+# Common error / logging plumbing (house style across the workspace).
+anyhow = "1.0.102"
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+# ── Release profile ─────────────────────────────────────────────────────────
+# Lightweight is the product (PLAN §1): optimize for size + no-panic-unwind in
+# the shipped daemons.
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

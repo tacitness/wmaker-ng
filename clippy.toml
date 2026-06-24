@@ -1,0 +1,10 @@
+# clippy configuration.
+#
+# Lint *severity* is enforced at the call site (`cargo clippy -- -D warnings`)
+# in the pre-commit hook and the validate workflow, so warnings are never
+# allowed to land. This file tunes lint *behavior* for a small, low-latency
+# systems codebase (PLAN §1: lightweight is the product).
+msrv = "1.85.0"
+
+# Flag avoidable heap traffic in the hot capture/event paths.
+avoid-breaking-exported-api = false

@@ -1,0 +1,6 @@
+# Pin the toolchain channel so local dev, hooks, and CI agree.
+# House style: latest stable, non-deprecated (PLAN §7).
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

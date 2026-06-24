@@ -1,0 +1,35 @@
+# ── Rust ────────────────────────────────────────────────────────────────────
+/target/
+**/*.rs.bk
+
+# Cargo.lock IS committed — this workspace ships binaries (ng-* / ai-*), so the
+# lockfile is part of the reproducible build (house style: PLAN §7).
+
+# ── Packaging artifacts (keep the recipes, ignore the output) ────────────────
+/dist/
+packaging/**/*.deb
+packaging/**/*.rpm
+packaging/**/*.apk
+
+# ── Python (ml/) — uv-managed ────────────────────────────────────────────────
+ml/.venv/
+ml/__pycache__/
+ml/**/__pycache__/
+ml/**/*.pyc
+ml/.ruff_cache/
+ml/.mypy_cache/
+
+# ── Editors / OS ─────────────────────────────────────────────────────────────
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ── Secrets — never commit ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key

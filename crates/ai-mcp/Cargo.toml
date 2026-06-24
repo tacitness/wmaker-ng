@@ -1,0 +1,27 @@
+[package]
+name = "ai-mcp"
+description = "wmaker-ai MCP server: computer-use tools (XTEST/XShm/EWMH) over the Model Context Protocol (PLAN §5)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ai-mcp"
+path = "src/main.rs"
+
+[dependencies]
+wmng-x11 = { path = "../wmng-x11" }
+wmng-ewmh = { path = "../wmng-ewmh" }
+ai-proto = { path = "../ai-proto" }
+# MCP server runtime over stdio (transport choice tracked in PLAN §9).
+rmcp = { workspace = true, features = ["server", "macros", "transport-io"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std"] }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

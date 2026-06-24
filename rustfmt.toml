@@ -1,0 +1,7 @@
+# rustfmt — stable options only, so `cargo fmt --check` is identical in the
+# pre-commit hook and in CI (PLAN §7).
+edition = "2024"
+max_width = 100
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_try_shorthand = true

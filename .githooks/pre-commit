@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# ============================================================================
+# pre-commit — fmt-check + clippy (deny warnings) + secret scan (PLAN §7).
+# Installed via `make hooks` (core.hooksPath=.githooks).
+# ============================================================================
+set -euo pipefail
+
+SCRIPT_NAME="$(basename "$0")"
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+
+require_command() {
+	local cmd
+	for cmd in "$@"; do
+		command -v "$cmd" >/dev/null 2>&1 || {
+			echo "error: $cmd is required by $SCRIPT_NAME" >&2
+			exit 1
+		}
+	done
+}
+
+main() {
+	require_command git make cargo
+	echo "==> pre-commit: fmt-check + clippy + secret-scan" >&2
+	make -C "$ROOT_DIR" pre-commit
+}
+
+main "$@"

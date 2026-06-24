@@ -1,0 +1,37 @@
+# nfpm recipe — wmaker-ai package (Layer 3: the MCP AI control plane).
+# Depends on wmaker-ng; adds the model-agnostic MCP server. Build via the same
+# `make package-*` targets. Skeleton only — `contents` land with the ai-mcp
+# skeleton (PLAN §8, Week 2+).
+name: wmaker-ai
+arch: amd64
+platform: linux
+version: ${PKG_VERSION}
+section: x11
+priority: optional
+maintainer: The wmaker-ng Team <ops@tacitsoft.dev>
+description: |
+  The AI control plane for Window Maker: a model-agnostic MCP server exposing
+  computer-use tools (input synthesis, screen capture, window control, and a
+  screen-diff change feed) over existing X11 extensions. Any model connects
+  over MCP; the window manager never learns it is being driven.
+vendor: TacitSoft
+homepage: https://windowmaker.org
+license: GPL-2.0-or-later
+
+depends:
+  - wmaker-ng
+
+contents:
+  - src: ../../target/release/ai-mcp
+    dst: /usr/bin/ai-mcp
+
+overrides:
+  apk:
+    depends:
+      - wmaker-ng
+  deb:
+    depends:
+      - wmaker-ng
+  rpm:
+    depends:
+      - wmaker-ng

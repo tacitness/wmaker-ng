@@ -1,0 +1,16 @@
+[package]
+name = "wmng-dbus"
+description = "Shared async D-Bus client helpers (udisks2 / logind / upower) over tokio (zbus)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+zbus.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+thiserror.workspace = true
+tracing.workspace = true

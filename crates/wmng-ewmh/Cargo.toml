@@ -1,0 +1,17 @@
+[package]
+name = "wmng-ewmh"
+description = "Shared _NET_* (EWMH) window-control client used to talk to the WM without core changes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+# EWMH rides on the same X connection as the rest of the X11 surface.
+wmng-x11 = { path = "../wmng-x11" }
+x11rb = { workspace = true, features = ["randr"] }
+thiserror.workspace = true
+tracing.workspace = true

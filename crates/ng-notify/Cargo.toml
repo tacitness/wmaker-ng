@@ -1,0 +1,22 @@
+[package]
+name = "ng-notify"
+description = "wmaker-ng daemon: org.freedesktop.Notifications server — native notifications (PLAN §5)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ng-notify"
+path = "src/main.rs"
+
+[dependencies]
+wmng-dbus = { path = "../wmng-dbus" }
+wmng-ewmh = { path = "../wmng-ewmh" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

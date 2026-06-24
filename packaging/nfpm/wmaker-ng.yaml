@@ -1,0 +1,40 @@
+# nfpm recipe — wmaker-ng package (Layer 2: modern Linux integration, no AI).
+# Build: `make package-deb | package-rpm | package-apk` (PKG_VERSION is exported
+# from the git tag by the Makefile — versioning never lives in this file).
+# Skeleton only: the `contents` point at release-build outputs that land once the
+# daemons are implemented (PLAN §8, Week 2+).
+name: wmaker-ng
+arch: amd64
+platform: linux
+version: ${PKG_VERSION}
+section: x11
+priority: optional
+maintainer: The wmaker-ng Team <ops@tacitsoft.dev>
+description: |
+  Modern Linux integration for GNU Window Maker — without the bloat.
+  Event-driven companions for auto-mount (udisks2), power/session
+  (logind/upower), and native notifications. Talks D-Bus to the system and
+  EWMH to the window manager; the C core stays pristine.
+vendor: TacitSoft
+homepage: https://windowmaker.org
+license: GPL-2.0-or-later
+
+# Suggests the window manager itself; does not hard-require a packaged core yet.
+recommends:
+  - wmaker
+
+contents:
+  - src: ../../target/release/ng-automount
+    dst: /usr/bin/ng-automount
+  - src: ../../target/release/ng-power
+    dst: /usr/bin/ng-power
+  - src: ../../target/release/ng-notify
+    dst: /usr/bin/ng-notify
+
+overrides:
+  apk:
+    depends: []
+  deb:
+    depends: []
+  rpm:
+    depends: []

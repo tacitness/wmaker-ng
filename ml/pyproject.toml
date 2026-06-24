@@ -1,0 +1,43 @@
+# ml/ — Phase-4 model & distillation tooling (PLAN §6 "Distilled model").
+# Quarantined Python: uv for packaging, ruff for lint+format, mypy for types
+# (PLAN §7). NO model code yet — this is the toolchain skeleton only.
+[project]
+name = "wmaker-ng-ml"
+version = "0.0.0"  # placeholder — release versioning lives in git tags
+description = "Phase-4 ML tooling for wmaker-ng: trace capture and model distillation."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-2.0-or-later"
+authors = [{ name = "The wmaker-ng Team" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.14.0",
+    "mypy>=1.18.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wmaker_ng_ml"]
+
+# ── ruff (lint + format) ──────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]

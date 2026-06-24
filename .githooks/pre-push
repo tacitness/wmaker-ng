@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ============================================================================
+# pre-push — build + test gate (PLAN §7).
+# Installed via `make hooks` (core.hooksPath=.githooks).
+# ============================================================================
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+
+command -v cargo >/dev/null 2>&1 || {
+	echo "error: cargo is required by pre-push" >&2
+	exit 1
+}
+
+echo "==> pre-push: build + test" >&2
+make -C "$ROOT_DIR" pre-push

@@ -1,0 +1,37 @@
+# cargo-deny — supply-chain / license / advisory gating (PLAN §7).
+# Format targets cargo-deny 0.16+ (the v2 action). Run with `cargo deny check`.
+
+[advisories]
+# Fail on any RUSTSEC advisory affecting the dependency graph.
+yanked = "deny"
+ignore = []
+
+[bans]
+# Catch accidental duplicate versions early; tighten to "deny" once the tree
+# stabilizes.
+multiple-versions = "warn"
+wildcards = "deny"
+# Intra-workspace crates are referenced by path (no version) — that is not a
+# real wildcard-version risk, so permit it.
+allow-wildcard-paths = true
+deny = []
+
+[licenses]
+# Fail closed: allow exactly the licenses present in the current dependency
+# graph (plus our provisional project license, GPL-2.0-or-later, honoring
+# Window Maker's lineage). Adding a crate under a new license is a conscious
+# decision — extend this list explicitly, never broaden it pre-emptively.
+confidence-threshold = 0.9
+allow = [
+    "GPL-2.0-or-later",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "Unicode-3.0",
+]
+
+[sources]
+# Only crates.io — no git or alternate registries without an explicit allow.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
