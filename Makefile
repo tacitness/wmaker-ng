@@ -98,9 +98,12 @@ hooks: ## Install the repo-managed git hooks (.githooks/)
 	@echo "Configured core.hooksPath=.githooks"
 
 .PHONY: install-dev-tools
-install-dev-tools: ## Install cargo-audit + cargo-deny locally
+install-dev-tools: ## Install cargo-audit + cargo-deny + gitleaks locally
 	$(CARGO) install cargo-audit --locked
 	$(CARGO) install cargo-deny --locked
+	@if command -v gitleaks >/dev/null 2>&1; then echo "gitleaks already installed"; \
+	elif command -v go >/dev/null 2>&1; then go install github.com/gitleaks/gitleaks/v8@latest; \
+	else echo "Install gitleaks for secret scanning: https://github.com/gitleaks/gitleaks#installing"; fi
 
 .PHONY: install-cross-tools
 install-cross-tools: ## Install the cross-build toolchain (cargo-zigbuild; needs zig on PATH)

@@ -3,12 +3,19 @@ name: Release
 # Tag-driven, like tsctl: `make bump-patch|minor|major` pushes a v* tag → this
 # runs. Version lives ONLY in the tag. All third-party Actions are pinned by
 # commit SHA with a version comment.
+#
+# Secrets follow the house pattern (dagobah-infra): GitHub Actions assumes an
+# AWS role via OIDC and pulls signing/deploy keys from Secrets Manager at
+# release time — nothing sensitive is stored as a GitHub Actions secret. The
+# signing + publish steps gate on the `AWS_ROLE_ARN` repo variable, so the
+# pipeline is green before infra wires the role and hardens automatically once
+# it does.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write # create the GitHub Release + upload artifacts
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -82,12 +89,17 @@ jobs:
     name: Sign, publish & release
     needs: packages
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # OIDC: assume the AWS role
     env:
-      # Map secrets to booleans so steps can gate on presence (tsctl pattern):
-      # the pipeline is green before ops provisions keys; it hardens once they do.
-      HAS_GPG: ${{ secrets.REPO_GPG_PRIVATE_KEY != '' && secrets.REPO_GPG_KEY_ID != '' }}
-      HAS_APK: ${{ secrets.APK_SIGNING_KEY != '' }}
-      HAS_DEPLOY: ${{ secrets.REPOS_DEPLOY_SSH_KEY != '' }}
+      AWS_REGION: us-west-2
+      # Secrets Manager secret ids (override via repo vars if infra names differ).
+      SM_GPG_KEY: ${{ vars.SM_GPG_KEY || '/tacitsoft/wmaker-ng/gpg-signing-key' }}
+      SM_APK_KEY: ${{ vars.SM_APK_KEY || '/tacitsoft/wmaker-ng/apk-signing-key' }}
+      SM_DEPLOY_KEY: ${{ vars.SM_DEPLOY_KEY || '/tacitsoft/wmaker-ng/repos-deploy-ssh-key' }}
+      # Signing + publish activate once infra sets the AWS_ROLE_ARN repo variable.
+      HAS_AWS: ${{ vars.AWS_ROLE_ARN != '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -102,35 +114,48 @@ jobs:
       - name: Install repo tooling
         run: sudo apt-get update && sudo apt-get install -y reprepro createrepo-c rpm gnupg
 
-      - name: Import GPG signing key
-        if: env.HAS_GPG == 'true'
+      - name: Configure AWS credentials (OIDC)
+        if: env.HAS_AWS == 'true'
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6.2.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: wmaker-ng-release-${{ github.run_id }}
+
+      - name: Fetch signing material from Secrets Manager
+        if: env.HAS_AWS == 'true'
         run: |
-          echo "${{ secrets.REPO_GPG_PRIVATE_KEY }}" | gpg --batch --import
-          echo "GPG_KEY_ID=${{ secrets.REPO_GPG_KEY_ID }}" >> "$GITHUB_ENV"
+          set -euo pipefail
+          mkdir -p dist/.keys && chmod 700 dist/.keys
+          # GPG private key → apt (reprepro) + rpm (rpm --addsign). Key id derived.
+          aws secretsmanager get-secret-value --secret-id "$SM_GPG_KEY" \
+            --query SecretString --output text | gpg --batch --import
+          key_id="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
+          echo "GPG_KEY_ID=$key_id" >> "$GITHUB_ENV"
+          # apk RSA private key → abuild-sign (separate key from GPG).
+          aws secretsmanager get-secret-value --secret-id "$SM_APK_KEY" \
+            --query SecretString --output text > dist/.keys/wmaker-ng.rsa
+          chmod 600 dist/.keys/wmaker-ng.rsa
+          echo "ABUILD_KEY=$PWD/dist/.keys/wmaker-ng.rsa" >> "$GITHUB_ENV"
 
       - name: Assemble apt + rpm repos
         run: make repo-apt repo-rpm
 
       - name: Assemble apk repo (Alpine container)
         run: |
-          KEYENV=""
-          if [ "$HAS_APK" = "true" ]; then
-            mkdir -p dist/.keys
-            echo "${{ secrets.APK_SIGNING_KEY }}" > dist/.keys/wmaker-ng.rsa
-            chmod 600 dist/.keys/wmaker-ng.rsa
-            KEYENV="-e ABUILD_KEY=/w/dist/.keys/wmaker-ng.rsa"
-          fi
-          docker run --rm -v "$PWD:/w" -w /w $KEYENV alpine:3.22 sh -c \
+          keyenv=""
+          [ -n "${ABUILD_KEY:-}" ] && keyenv="-e ABUILD_KEY=/w/dist/.keys/wmaker-ng.rsa"
+          docker run --rm -v "$PWD:/w" -w /w $keyenv alpine:3.22 sh -c \
             'apk add --no-cache bash abuild >/dev/null && bash scripts/repo-apk.sh dist/repo/apk dist/pkg'
 
       - name: Publish repos to repos.tacitsoft.dev
-        if: env.HAS_DEPLOY == 'true'
-        uses: webfactory/ssh-agent@a6f90b1f127823b31d4d4a8d96047790581349bd # v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.REPOS_DEPLOY_SSH_KEY }}
-      - name: rsync publish
-        if: env.HAS_DEPLOY == 'true'
-        run: scripts/publish.sh dist/repo
+        if: env.HAS_AWS == 'true'
+        run: |
+          set -euo pipefail
+          eval "$(ssh-agent -s)"
+          aws secretsmanager get-secret-value --secret-id "$SM_DEPLOY_KEY" \
+            --query SecretString --output text | ssh-add -
+          scripts/publish.sh dist/repo
 
       - name: Create GitHub Release
         env:

@@ -1,23 +1,33 @@
 #!/usr/bin/env bash
 # ============================================================================
-# secret-scan.sh — block obvious secrets before they enter history (PLAN §7).
-# Scans staged changes (or the whole tree when nothing is staged) for common
-# credential shapes. Conservative by design: catches the obvious, defers deep
-# entropy scanning to dedicated tooling.
+# secret-scan.sh — block secrets before they enter history (PLAN §7).
+#
+# Primary: gitleaks (industry-standard, low false-positive) over the staged
+# change set. Fallback: a conservative built-in regex scan when gitleaks is not
+# installed, so the gate still does *something* — but gitleaks is the supported
+# path (CI enforces it; install with `make install-dev-tools`).
 # ============================================================================
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
-# Patterns: AWS keys, private-key headers, and generic assigned secrets/tokens.
+# ── Primary: gitleaks ────────────────────────────────────────────────────────
+if command -v gitleaks >/dev/null 2>&1; then
+	echo "secret-scan: gitleaks (staged)" >&2
+	# Uses ./.gitleaks.toml automatically; --redact keeps any match out of logs.
+	exec gitleaks protect --staged --redact --no-banner
+fi
+
+# ── Fallback: built-in regex scan ────────────────────────────────────────────
+echo "secret-scan: gitleaks not found — using built-in fallback (install gitleaks: make install-dev-tools)" >&2
+
 patterns=(
 	'AKIA[0-9A-Z]{16}'
 	'-----BEGIN [A-Z ]*PRIVATE KEY-----'
 	'(secret|password|passwd|token|api[_-]?key)[[:space:]]*[:=][[:space:]]*['"'"'"][^'"'"'"]{8,}['"'"'"]'
 )
 
-# Prefer staged diff; fall back to tracked files for manual/`make` invocation.
 if git diff --cached --quiet 2>/dev/null; then
 	files=$(git ls-files)
 	mode="tracked files"
@@ -33,7 +43,6 @@ fi
 
 found=0
 for pat in "${patterns[@]}"; do
-	# -I skips binaries; this hook never edits, only reports.
 	while IFS= read -r f; do
 		[[ -f "$f" ]] || continue
 		if grep -InEq "$pat" -- "$f" 2>/dev/null; then

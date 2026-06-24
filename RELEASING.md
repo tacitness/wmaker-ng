@@ -45,22 +45,38 @@ revisit when distros roll.
    - **apk** — `APKINDEX` signed with `abuild-sign` (RSA) in an Alpine container.
    - **publish** — `rsync` to `repos.tacitsoft.dev` under `/srv/repos/wmaker-ng/`.
 
-## Required CI secrets (ops to provision)
+## Secrets — OIDC + AWS Secrets Manager (house pattern)
 
-Signing and publishing **gate on secret presence** — until these are set, the
-pipeline still builds, packages, assembles *unsigned* repos, and cuts the GitHub
-Release. It hardens automatically once they land (the tsctl conditional-creds
-pattern).
+No signing keys live as GitHub Actions secrets. The `release` job assumes an AWS
+role via **OIDC** and pulls keys from **Secrets Manager** at release time — one
+rotatable source of truth, consistent with dagobah-infra (ESO → Secrets
+Manager). Signing + publish **gate on the `AWS_ROLE_ARN` repo variable**: until
+it is set, the pipeline still builds, packages, assembles *unsigned* repos, and
+cuts the GitHub Release; it hardens automatically once infra wires the role.
 
-| Secret                   | Purpose                                              |
-|--------------------------|------------------------------------------------------|
-| `REPO_GPG_PRIVATE_KEY`   | Armored GPG private key — signs apt + rpm            |
-| `REPO_GPG_KEY_ID`        | Key id / fingerprint for the above                   |
-| `APK_SIGNING_KEY`        | abuild **RSA** private key — signs the apk `APKINDEX` |
-| `REPOS_DEPLOY_SSH_KEY`   | SSH key for `deploy@repos.tacitsoft.dev`             |
+**Repo variable** (GitHub → Settings → Variables): `AWS_ROLE_ARN` = the OIDC
+role to assume (`us-west-2`). Optional overrides: `SM_GPG_KEY`, `SM_APK_KEY`,
+`SM_DEPLOY_KEY` if the Secrets Manager paths differ from the defaults below.
 
-> apt/rpm use **GPG**; apk uses a **separate RSA** key — they are not the same
-> key. Never add secrets from this repo; ops provisions them out of band.
+**Secrets Manager entries** (`us-west-2`, ops to provision):
+
+| Secret id (default)                          | Contents                                            |
+|----------------------------------------------|-----------------------------------------------------|
+| `/tacitsoft/wmaker-ng/gpg-signing-key`       | Armored GPG **private** key — signs apt + rpm (key id derived on import) |
+| `/tacitsoft/wmaker-ng/apk-signing-key`       | abuild **RSA** private key — signs the apk `APKINDEX` |
+| `/tacitsoft/wmaker-ng/repos-deploy-ssh-key`  | SSH private key for `deploy@repos.tacitsoft.dev`    |
+
+> apt/rpm use **GPG**; apk uses a **separate RSA** key. The OIDC role's trust
+> policy must include `repo:tacitness/wmaker-ng:*` and its IAM policy must grant
+> `secretsmanager:GetSecretValue` on `/tacitsoft/wmaker-ng/*`. Never add secrets
+> from this repo; infra provisions them in Secrets Manager.
+
+## Secret scanning
+
+`gitleaks` runs in the pre-commit hook (`.githooks/secret-scan.sh`, staged
+changes) and in CI (`validate.yml`, full history), configured by
+[`.gitleaks.toml`](.gitleaks.toml). `make install-dev-tools` installs it; the
+hook falls back to a built-in regex scan if gitleaks is absent.
 
 ## Local dry run (no signing, no publish)
 

@@ -1,0 +1,18 @@
+# gitleaks config — extends the maintained default ruleset (PLAN §7).
+# Used by the pre-commit hook (.githooks/secret-scan.sh) and CI (validate.yml).
+title = "wmaker-ng"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project placeholders and the secret-scanner's own example patterns."
+# The fallback scanner embeds example credential *patterns* (e.g. the AWS key
+# shape) as regex literals — not real secrets.
+paths = [
+  '''\.githooks/secret-scan\.sh''',
+]
+# `${{ secrets.X }}` / `${{ vars.X }}` are references, never values.
+regexes = [
+  '''\$\{\{\s*(secrets|vars)\.[A-Za-z0-9_]+''',
+]
