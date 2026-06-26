@@ -12,6 +12,6 @@ publish.workspace = true
 [dependencies]
 # EWMH rides on the same X connection as the rest of the X11 surface.
 wmng-x11 = { path = "../wmng-x11" }
-x11rb = { workspace = true, features = ["randr"] }
+# Core xproto only — EWMH is properties + client messages, no extensions.
+x11rb.workspace = true
 thiserror.workspace = true
-tracing.workspace = true

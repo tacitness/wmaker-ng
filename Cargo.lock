@@ -1243,7 +1243,6 @@ name = "wmng-ewmh"
 version = "0.0.0"
 dependencies = [
  "thiserror",
- "tracing",
  "wmng-x11",
  "x11rb",
 ]
