@@ -12,5 +12,6 @@ publish.workspace = true
 [dependencies]
 # The exact extensions wmaker-ai drives over (PLAN §5/§6).
 x11rb = { workspace = true, features = ["damage", "xtest", "shm", "xfixes"] }
+libc.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

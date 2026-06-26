@@ -1252,6 +1252,7 @@ dependencies = [
 name = "wmng-x11"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "thiserror",
  "tracing",
  "x11rb",
