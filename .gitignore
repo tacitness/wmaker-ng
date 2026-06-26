@@ -11,6 +11,9 @@ packaging/**/*.deb
 packaging/**/*.rpm
 packaging/**/*.apk
 
+# Transient binary staged into the sandbox build context by `make sandbox-image`.
+/sandbox/ai-mcp
+
 # ── Python (ml/) — uv-managed ────────────────────────────────────────────────
 ml/.venv/
 ml/__pycache__/

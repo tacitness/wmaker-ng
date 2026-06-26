@@ -167,6 +167,15 @@ publish: ## rsync the assembled repos → repos.tacitsoft.dev (needs deploy key)
 .PHONY: release-local
 release-local: cross-build packages tarballs ## Full release build, no publish (CI parity sans signing)
 
+# ── Sandbox image (#18): Xvfb + wmaker + ai-mcp ───────────────────────────────
+.PHONY: sandbox-image
+sandbox-image: ## Build the wmaker-ai sandbox image (needs wmaker-crm:headless base)
+	$(CARGO) build --release -p ai-mcp
+	install -m 0755 $(ROOT_DIR)/target/release/ai-mcp $(ROOT_DIR)/sandbox/ai-mcp
+	docker build -t wmaker-ai-sandbox $(ROOT_DIR)/sandbox
+	rm -f $(ROOT_DIR)/sandbox/ai-mcp
+	@echo "Built wmaker-ai-sandbox (base: wmaker-crm:headless)"
+
 # ── Release (tag-only versioning) ─────────────────────────────────────────────
 _VER_MAJOR := $(shell echo $(_BASE_VER) | cut -d. -f1)
 _VER_MINOR := $(shell echo $(_BASE_VER) | cut -d. -f2)
