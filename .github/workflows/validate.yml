@@ -76,6 +76,7 @@ jobs:
           curl -fsSL "$url" -o cargo-audit.tgz
           echo "$sha256  cargo-audit.tgz" | sha256sum -c -
           tar -xzf cargo-audit.tgz
+          mkdir -p "$HOME/.cargo/bin"
           install -m 0755 cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit "$HOME/.cargo/bin/cargo-audit"
       - run: cargo audit
 
@@ -92,6 +93,7 @@ jobs:
           curl -fsSL "$url" -o cargo-deny.tar.gz
           echo "$sha256  cargo-deny.tar.gz" | sha256sum -c -
           tar -xzf cargo-deny.tar.gz
+          mkdir -p "$HOME/.cargo/bin"
           install -m 0755 cargo-deny-0.19.8-x86_64-unknown-linux-musl/cargo-deny "$HOME/.cargo/bin/cargo-deny"
       - run: cargo deny check
 
