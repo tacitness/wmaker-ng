@@ -21,6 +21,19 @@ make packages        # → dist/pkg/*.{deb,rpm,apk}  (deb/rpm from glibc, apk fr
 make release-local   # cross-build + packages + tarballs, no signing/publish
 ```
 
+## Runtime Defaults
+
+The packages install binaries only. They intentionally do not install or enable
+systemd/systemd-user units yet:
+
+- `wmaker-ng` ships `ng-automount`, `ng-power`, and `ng-notify` as opt-in
+  developer tools until their D-Bus reactors are real.
+- `wmaker-ai` ships `ai-mcp` as a stdio MCP server that the driving agent starts
+  on the target `DISPLAY`.
+
+This keeps a daily-driver install reversible and idle-clean: no background
+daemon starts just because the package was installed.
+
 Versioning comes from the git tag via the Makefile (`PKG_VERSION`); it is never
 written into the recipes. The full tag → signed multi-arch repos flow, the
 target matrix, required CI secrets, and consumer install instructions live in

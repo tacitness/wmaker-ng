@@ -51,6 +51,10 @@ the normal OpenClaw-driven desktop.
     display `:99`.
   - Native amd64 RPMs for `wmaker-ng` and `wmaker-ai` built with `nfpm`, and
     `rpm -Uvh --test` passed for the pair.
+- Layer 2 daemon default is decided: the package installs the `ng-*` binaries
+  only, with no systemd/user units and no automatic start. `ng-automount`,
+  `ng-power`, and `ng-notify` stay opt-in developer services until their D-Bus
+  reactors are implemented and separately smoke-tested.
 
 ## Local Gates
 
@@ -148,7 +152,5 @@ Compare:
 
 These are the concrete blockers before replacing the live desktop:
 
-1. Decide whether Layer 2 daemons remain disabled by default until their D-Bus
-   reactors are real, or ship as opt-in developer services.
-2. Re-run baseline 1 and baseline 2 after install and publish the comparison
+1. Re-run baseline 1 and baseline 2 after install and publish the comparison
    artifact beside the existing S3 data.
