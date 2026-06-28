@@ -12,7 +12,7 @@ pub use error::{Error, Result};
 use wmng_x11::X;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ClientMessageEvent, ConnectionExt as _, EventMask, Window,
+    Atom, AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt as _, EventMask, Window,
 };
 
 /// Source indication "pager/tool" (EWMH) — WMs honour these requests.
@@ -141,7 +141,9 @@ impl<'x> Ewmh<'x> {
         width: u32,
         height: u32,
     ) -> Result<()> {
-        self.require_supported(self.atoms.moveresize, "_NET_MOVERESIZE_WINDOW")?;
+        if !self.is_supported(self.atoms.moveresize)? {
+            return self.configure_window(window, x, y, width, height);
+        }
         // flags: bits 8-11 mark x/y/width/height present; bits 12-13 = source.
         let flags = (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (SOURCE_PAGER << 12);
         self.send_root_message(
@@ -176,6 +178,14 @@ impl<'x> Ewmh<'x> {
 
     // ── internals ────────────────────────────────────────────────────────────
     fn require_supported(&self, atom: Atom, name: &'static str) -> Result<()> {
+        if self.is_supported(atom)? {
+            Ok(())
+        } else {
+            Err(Error::Unsupported(name))
+        }
+    }
+
+    fn is_supported(&self, atom: Atom) -> Result<bool> {
         let reply = self
             .x
             .conn()
@@ -188,14 +198,29 @@ impl<'x> Ewmh<'x> {
                 u32::MAX,
             )?
             .reply()?;
-        let supported = reply
+        Ok(reply
             .value32()
-            .is_some_and(|mut atoms| atoms.any(|supported| supported == atom));
-        if supported {
-            Ok(())
-        } else {
-            Err(Error::Unsupported(name))
-        }
+            .is_some_and(|mut atoms| atoms.any(|supported| supported == atom)))
+    }
+
+    fn configure_window(
+        &self,
+        window: Window,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
+        self.x.conn().configure_window(
+            window,
+            &ConfigureWindowAux::new()
+                .x(x)
+                .y(y)
+                .width(width)
+                .height(height),
+        )?;
+        self.x.conn().flush()?;
+        Ok(())
     }
 
     fn window_title(&self, window: Window) -> Result<String> {

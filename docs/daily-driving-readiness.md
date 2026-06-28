@@ -40,6 +40,17 @@ the normal OpenClaw-driven desktop.
   - `changed_regions`
 - `changed_regions` is the primary expected win over screenshot-only driving:
   it returns XDamage-backed PNG crops, with configurable keyframe re-baselines.
+- Window movement prefers EWMH when the WM advertises it and falls back to a
+  direct X11 configure request for older/lightweight WMs that do not expose
+  `_NET_MOVERESIZE_WINDOW`.
+- Local readiness checks on 2026-06-28:
+  - `DISPLAY=:9 make mcp-smoke` passed against the live desktop.
+  - `wmaker-crm:headless` built locally from `/data/src/tacitsoft/infrastructure/wmaker-crm`.
+  - `wmaker-ai-sandbox` built locally from that base image.
+  - `docker run --rm wmaker-ai-sandbox ai-mcp --check` passed on container
+    display `:99`.
+  - Native amd64 RPMs for `wmaker-ng` and `wmaker-ai` built with `nfpm`, and
+    `rpm -Uvh --test` passed for the pair.
 
 ## Local Gates
 
@@ -49,6 +60,7 @@ Run from `wmaker-ng`:
 make pre-commit
 make pre-push
 cargo test -p ai-proto -p wmng-x11 -p wmng-ewmh -p ai-mcp
+DISPLAY=:9 make mcp-smoke
 ```
 
 Run from `wmaker-crm`:
@@ -82,19 +94,20 @@ WMAKER_AI_MAX_DIRTY_REGIONS=16
 ```
 
 Daily-driver defaults should favor bounded payloads over perfect compression.
-If a frame becomes too noisy, the protocol should emit one keyframe instead of a
-large pile of small regions.
+If the XDamage feed reports too many regions, the protocol coalesces them into a
+bounded dirty crop and only emits a keyframe when the coalesced dirty area is too
+large.
 
 ## Acceptance Smoke
 
 Use a disposable desktop window, such as `xclock`, on the target display:
 
 ```bash
-DISPLAY=:9 xclock &
-DISPLAY=:9 ai-mcp
+DISPLAY=:9 make mcp-smoke
 ```
 
-An MCP client must verify:
+The smoke script launches the first available disposable X client from
+`xclock`, `xterm`, or `zenity`, then speaks MCP over stdio and verifies:
 
 1. `ai-mcp --check` reports display size, depth, bytes-per-pixel, and SHM
    availability.
@@ -135,11 +148,7 @@ Compare:
 
 These are the concrete blockers before replacing the live desktop:
 
-1. Add a real MCP smoke client or script so the post-`--check` acceptance smoke
-   is automated.
-2. Finish `wmaker-crm` headless image verification for the sandbox base.
-3. Package/install test `wmaker-ng` and `wmaker-ai` locally.
-4. Decide whether Layer 2 daemons remain disabled by default until their D-Bus
+1. Decide whether Layer 2 daemons remain disabled by default until their D-Bus
    reactors are real, or ship as opt-in developer services.
-5. Re-run baseline 1 and baseline 2 after install and publish the comparison
+2. Re-run baseline 1 and baseline 2 after install and publish the comparison
    artifact beside the existing S3 data.

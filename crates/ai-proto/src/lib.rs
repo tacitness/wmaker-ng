@@ -82,7 +82,10 @@ impl DiffEncoder {
         frame: &Frame<'_>,
         dirty: &[XRectangle],
     ) -> Result<ScreenUpdate, Error> {
-        let rects = normalize_rects(frame.width, frame.height, dirty);
+        let rects = coalesce_rects(
+            normalize_rects(frame.width, frame.height, dirty),
+            self.config.max_regions,
+        );
         let dirty_area = rects
             .iter()
             .fold(0u32, |total, rect| total.saturating_add(rect.area()));
@@ -98,11 +101,6 @@ impl DiffEncoder {
                 rebaseline_reason: None,
                 regions: Vec::new(),
             });
-        }
-        if let Some(reason) = self.region_count_reason(&rects) {
-            let mut update = self.keyframe(frame)?;
-            update.rebaseline_reason = Some(reason);
-            return Ok(update);
         }
         if let Some(reason) = self.rebaseline_reason(frame, dirty_area) {
             let mut update = self.keyframe(frame)?;
@@ -132,13 +130,6 @@ impl DiffEncoder {
         let screen_area = frame.width as f32 * frame.height as f32;
         if screen_area > 0.0 && dirty_area as f32 / screen_area >= self.config.max_dirty_ratio {
             return Some(RebaselineReason::Area);
-        }
-        None
-    }
-
-    fn region_count_reason(&self, rects: &[Rect]) -> Option<RebaselineReason> {
-        if rects.len() > self.config.max_regions {
-            return Some(RebaselineReason::RegionCount);
         }
         None
     }
@@ -208,6 +199,33 @@ fn normalize_rects(width: u16, height: u16, dirty: &[XRectangle]) -> Vec<Rect> {
     rects.sort_by_key(|r| (r.y, r.x, r.height, r.width));
     rects.dedup();
     rects
+}
+
+fn coalesce_rects(rects: Vec<Rect>, max_regions: usize) -> Vec<Rect> {
+    if rects.len() <= max_regions {
+        return rects;
+    }
+    let Some(first) = rects.first().copied() else {
+        return rects;
+    };
+    let (mut x0, mut y0, mut x1, mut y1) = (
+        first.x,
+        first.y,
+        first.x + first.width,
+        first.y + first.height,
+    );
+    for rect in rects.iter().skip(1) {
+        x0 = x0.min(rect.x);
+        y0 = y0.min(rect.y);
+        x1 = x1.max(rect.x + rect.width);
+        y1 = y1.max(rect.y + rect.height);
+    }
+    vec![Rect {
+        x: x0,
+        y: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+    }]
 }
 
 fn clip_rect(width: u16, height: u16, r: &XRectangle) -> Option<Rect> {
@@ -330,5 +348,42 @@ mod tests {
         );
 
         assert!(rects.is_empty());
+    }
+
+    #[test]
+    fn coalesces_too_many_rectangles_to_bounding_region() {
+        let rects = coalesce_rects(
+            vec![
+                Rect {
+                    x: 10,
+                    y: 10,
+                    width: 5,
+                    height: 5,
+                },
+                Rect {
+                    x: 30,
+                    y: 15,
+                    width: 10,
+                    height: 10,
+                },
+                Rect {
+                    x: 20,
+                    y: 50,
+                    width: 5,
+                    height: 5,
+                },
+            ],
+            2,
+        );
+
+        assert_eq!(
+            rects,
+            vec![Rect {
+                x: 10,
+                y: 10,
+                width: 30,
+                height: 45,
+            }]
+        );
     }
 }

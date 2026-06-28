@@ -21,7 +21,7 @@ impl DamageFeed {
     pub fn new(x: Arc<X>) -> Result<Self> {
         let damage = x.conn().generate_id()?;
         x.conn()
-            .damage_create(damage, x.root(), ReportLevel::RAW_RECTANGLES)?;
+            .damage_create(damage, x.root(), ReportLevel::DELTA_RECTANGLES)?;
         x.conn().flush()?;
         Ok(Self { x, damage })
     }
@@ -34,6 +34,8 @@ impl DamageFeed {
                 rects.push(n.area);
             }
         }
+        self.x.conn().damage_subtract(self.damage, 0u32, 0u32)?;
+        self.x.conn().flush()?;
         Ok(rects)
     }
 }

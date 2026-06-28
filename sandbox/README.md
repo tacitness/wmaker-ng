@@ -27,3 +27,12 @@ The base entrypoint brings up Xvfb (`DISPLAY=:99`) + wmaker, then execs the
 command into the live desktop. `ai-mcp` exposes `move_mouse`/`click`/`type`/
 `key`/`list_windows`/`focus`/`move_resize`/`tile`/`screenshot` — the same tools
 proven by hand in #16.
+
+For an automated host-side runtime smoke, use:
+
+```bash
+DISPLAY=:9 make mcp-smoke
+```
+
+The smoke client speaks MCP over stdio, launches a disposable X client, moves it
+through EWMH, and verifies both full screenshot and XDamage delta observations.

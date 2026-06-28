@@ -52,6 +52,10 @@ release: ## Build the whole workspace (release, optimized for size)
 test: ## Run all tests
 	$(CARGO) test --workspace
 
+.PHONY: mcp-smoke
+mcp-smoke: ## Smoke-test ai-mcp against DISPLAY (default :9)
+	DISPLAY=$${DISPLAY:-:9} scripts/mcp-smoke.py --display "$${DISPLAY:-:9}"
+
 # ── Quality gates ─────────────────────────────────────────────────────────────
 .PHONY: fmt
 fmt: ## Format all crates
