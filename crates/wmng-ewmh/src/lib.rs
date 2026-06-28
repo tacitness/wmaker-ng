@@ -46,6 +46,7 @@ pub struct Ewmh<'x> {
 }
 
 struct Atoms {
+    supported: Atom,
     client_list: Atom,
     active_window: Atom,
     moveresize: Atom,
@@ -61,6 +62,7 @@ impl<'x> Ewmh<'x> {
             Ok(x.conn().intern_atom(false, name.as_bytes())?.reply()?.atom)
         };
         let atoms = Atoms {
+            supported: intern("_NET_SUPPORTED")?,
             client_list: intern("_NET_CLIENT_LIST")?,
             active_window: intern("_NET_ACTIVE_WINDOW")?,
             moveresize: intern("_NET_MOVERESIZE_WINDOW")?,
@@ -126,6 +128,7 @@ impl<'x> Ewmh<'x> {
 
     /// Ask the WM to activate (focus + raise) a window.
     pub fn focus(&self, window: Window) -> Result<()> {
+        self.require_supported(self.atoms.active_window, "_NET_ACTIVE_WINDOW")?;
         self.send_root_message(window, self.atoms.active_window, [SOURCE_PAGER, 0, 0, 0, 0])
     }
 
@@ -138,6 +141,7 @@ impl<'x> Ewmh<'x> {
         width: u32,
         height: u32,
     ) -> Result<()> {
+        self.require_supported(self.atoms.moveresize, "_NET_MOVERESIZE_WINDOW")?;
         // flags: bits 8-11 mark x/y/width/height present; bits 12-13 = source.
         let flags = (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (SOURCE_PAGER << 12);
         self.send_root_message(
@@ -149,6 +153,7 @@ impl<'x> Ewmh<'x> {
 
     /// Ask the WM to close a window (`_NET_CLOSE_WINDOW`).
     pub fn close(&self, window: Window) -> Result<()> {
+        self.require_supported(self.atoms.close_window, "_NET_CLOSE_WINDOW")?;
         self.send_root_message(window, self.atoms.close_window, [0, SOURCE_PAGER, 0, 0, 0])
     }
 
@@ -170,6 +175,29 @@ impl<'x> Ewmh<'x> {
     }
 
     // ── internals ────────────────────────────────────────────────────────────
+    fn require_supported(&self, atom: Atom, name: &'static str) -> Result<()> {
+        let reply = self
+            .x
+            .conn()
+            .get_property(
+                false,
+                self.x.root(),
+                self.atoms.supported,
+                AtomEnum::ATOM,
+                0,
+                u32::MAX,
+            )?
+            .reply()?;
+        let supported = reply
+            .value32()
+            .is_some_and(|mut atoms| atoms.any(|supported| supported == atom));
+        if supported {
+            Ok(())
+        } else {
+            Err(Error::Unsupported(name))
+        }
+    }
+
     fn window_title(&self, window: Window) -> Result<String> {
         // Prefer _NET_WM_NAME (UTF-8); fall back to the legacy WM_NAME.
         for atom in [self.atoms.net_wm_name, AtomEnum::WM_NAME.into()] {

@@ -6,8 +6,10 @@
 //! `wmng-ewmh` (`_NET_*`). Any MCP client connects over stdio and drives a real
 //! Window Maker desktop; the WM never learns it is being driven.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
+use ai_proto::{DiffConfig, DiffEncoder, ScreenUpdate};
 use base64::Engine as _;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, Content, ErrorData};
@@ -16,12 +18,14 @@ use rmcp::{ServiceExt, tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wmng_ewmh::{Ewmh, TileSlot};
-use wmng_x11::X;
+use wmng_x11::{DamageFeed, X};
 
 /// The MCP server: holds the shared X connection. Cheap to clone (Arc).
 #[derive(Clone)]
 struct WmCtl {
     x: Arc<X>,
+    diff: Arc<Mutex<DiffEncoder>>,
+    damage: Arc<Mutex<DamageFeed>>,
 }
 
 // ── Tool parameter / output schemas (auto-generate the MCP contract) ─────────
@@ -116,6 +120,25 @@ struct WindowOut {
 #[derive(Serialize, JsonSchema)]
 struct WindowList {
     windows: Vec<WindowOut>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct RegionOut {
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    png_base64: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ScreenUpdateOut {
+    kind: String,
+    width: u16,
+    height: u16,
+    dirty_area: u32,
+    rebaseline_reason: Option<String>,
+    regions: Vec<RegionOut>,
 }
 
 #[tool_router(server_handler)]
@@ -219,18 +242,34 @@ impl WmCtl {
         run(move || {
             let mut cap = x.capture().map_err(to_err)?;
             let frame = cap.frame().map_err(to_err)?;
-            let png = encode_png(
-                frame.bytes(),
-                frame.width,
-                frame.height,
-                frame.bytes_per_pixel,
-            )
-            .map_err(to_err)?;
+            let png = ai_proto::encode_full_png(&frame).map_err(to_err)?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
             Ok(CallToolResult::success(vec![Content::image(
                 b64,
                 "image/png",
             )]))
+        })
+        .await
+    }
+
+    #[tool(
+        name = "changed_regions",
+        description = "Return XDamage dirty rectangles as PNG crops, with keyframe re-baseline when needed."
+    )]
+    async fn changed_regions(&self) -> Result<Json<ScreenUpdateOut>, ErrorData> {
+        let x = self.x.clone();
+        let diff = self.diff.clone();
+        let damage = self.damage.clone();
+        run(move || {
+            let mut cap = x.capture().map_err(to_err)?;
+            let dirty = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
+            let frame = cap.frame().map_err(to_err)?;
+            let update = diff
+                .lock()
+                .map_err(lock_err)?
+                .changed_regions(&frame, &dirty)
+                .map_err(to_err)?;
+            Ok(Json(to_screen_update_out(update)))
         })
         .await
     }
@@ -249,34 +288,105 @@ fn to_err<E: std::fmt::Display>(e: E) -> ErrorData {
     ErrorData::internal_error(e.to_string(), None)
 }
 
-/// Encode an X `Z_PIXMAP` frame (little-endian B,G,R,X) as an RGBA PNG.
-fn encode_png(src: &[u8], width: u16, height: u16, bpp: u8) -> Result<Vec<u8>, String> {
-    let (w, h, bpp) = (width as usize, height as usize, bpp as usize);
-    let mut rgba = Vec::with_capacity(w * h * 4);
-    for px in src.chunks_exact(bpp) {
-        rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+fn lock_err<T>(e: PoisonError<T>) -> ErrorData {
+    ErrorData::internal_error(e.to_string(), None)
+}
+
+fn to_screen_update_out(update: ScreenUpdate) -> ScreenUpdateOut {
+    ScreenUpdateOut {
+        kind: format!("{:?}", update.kind).to_ascii_lowercase(),
+        width: update.width,
+        height: update.height,
+        dirty_area: update.dirty_area,
+        rebaseline_reason: update
+            .rebaseline_reason
+            .map(|r| format!("{r:?}").to_ascii_lowercase()),
+        regions: update
+            .regions
+            .into_iter()
+            .map(|r| RegionOut {
+                x: r.rect.x,
+                y: r.rect.y,
+                width: r.rect.width,
+                height: r.rect.height,
+                png_base64: base64::engine::general_purpose::STANDARD.encode(r.png),
+            })
+            .collect(),
     }
-    let mut out = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut out, w as u32, h as u32);
-        enc.set_color(png::ColorType::Rgba);
-        enc.set_depth(png::BitDepth::Eight);
-        let mut writer = enc.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(&rgba).map_err(|e| e.to_string())?;
-    }
-    Ok(out)
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--version" || arg == "-V") {
+        println!("ai-mcp {}", version());
+        return Ok(());
+    }
+    if args.iter().any(|arg| arg == "--check") {
+        check_runtime()?;
+        return Ok(());
+    }
+
     // Logs MUST go to stderr — stdout is the MCP transport.
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .init();
 
-    let x = X::connect()?;
+    let x = Arc::new(X::connect()?);
+    let damage = Arc::new(Mutex::new(x.damage_feed()?));
     tracing::info!("ai-mcp: connected to X, serving MCP over stdio");
-    let service = WmCtl { x: Arc::new(x) }.serve(stdio()).await?;
+    let service = WmCtl {
+        x,
+        diff: Arc::new(Mutex::new(DiffEncoder::new(diff_config_from_env()))),
+        damage,
+    }
+    .serve(stdio())
+    .await?;
     service.waiting().await?;
     Ok(())
+}
+
+fn version() -> &'static str {
+    option_env!("WMAKER_NG_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+fn check_runtime() -> anyhow::Result<()> {
+    let x = Arc::new(X::connect()?);
+    let (width, height) = x.dimensions();
+    let mut cap = x.capture()?;
+    let frame = cap.frame()?;
+    let _damage = x.damage_feed()?;
+    println!(
+        "ai-mcp check ok display={} size={}x{} depth={} bpp={} shm={}",
+        std::env::var("DISPLAY").unwrap_or_else(|_| "<unset>".to_string()),
+        width,
+        height,
+        frame.depth,
+        frame.bytes_per_pixel,
+        x.shm_available()
+    );
+    Ok(())
+}
+
+fn diff_config_from_env() -> DiffConfig {
+    let mut config = DiffConfig::default();
+    if let Some(ms) = std::env::var("WMAKER_AI_KEYFRAME_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        config.keyframe_interval = Duration::from_millis(ms);
+    }
+    if let Some(ratio) = std::env::var("WMAKER_AI_MAX_DIRTY_RATIO")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        config.max_dirty_ratio = ratio.clamp(0.01, 1.0);
+    }
+    if let Some(max_regions) = std::env::var("WMAKER_AI_MAX_DIRTY_REGIONS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        config.max_regions = max_regions.max(1);
+    }
+    config
 }

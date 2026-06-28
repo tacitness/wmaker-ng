@@ -23,6 +23,7 @@ pub use damage::DamageFeed;
 pub use error::{Error, Result};
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use x11rb::connection::{Connection, RequestConnection as _};
 use x11rb::protocol::damage::ConnectionExt as _;
@@ -194,8 +195,8 @@ impl X {
     }
 
     /// Subscribe to the root-window damage stream.
-    pub fn damage_feed(&self) -> Result<DamageFeed<'_>> {
-        DamageFeed::new(self)
+    pub fn damage_feed(self: &Arc<Self>) -> Result<DamageFeed> {
+        DamageFeed::new(self.clone())
     }
 
     /// Fetch the current cursor image (XFixes).
