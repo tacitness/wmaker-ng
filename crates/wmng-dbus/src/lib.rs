@@ -1,11 +1,33 @@
-//! Shared async D-Bus client helpers for the wmaker-ng companions.
+//! Shared async D-Bus clients for the wmaker-ng companions.
 //!
-//! The system already does the privileged work (udisks2 / logind / upower);
-//! the `ng-*` daemons are thin reactors that subscribe here and surface state
-//! to the window manager over EWMH (PLAN §5). D-Bus lives ONLY in these
-//! companions — never in the C event loop.
-//!
-//! No behavior yet — Week 1 scaffold only.
+//! The `ng-*` daemons stay idle until the system bus tells them something
+//! changed: removable media appeared, power state flipped, or logind is about
+//! to suspend. This crate is the shared zbus surface for those event-driven
+//! daemons; the Window Maker core remains untouched and out-of-process.
 
-/// Placeholder marker until the udisks2/logind/upower proxies are wired.
-pub const SCAFFOLD: &str = "wmng-dbus";
+mod error;
+mod login1;
+mod udisks2;
+mod upower;
+mod util;
+
+pub use error::{Error, Result};
+pub use login1::{Login1, LoginState, LoginStateSnapshot};
+pub use udisks2::{BlockDeviceSnapshot, UDisks2};
+pub use upower::{DisplayDeviceSnapshot, PowerStateSnapshot, UPower};
+
+/// Open a connection to the system bus.
+pub async fn system_connection() -> Result<zbus::Connection> {
+    Ok(zbus::Connection::system().await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::system_connection;
+
+    #[tokio::test]
+    #[ignore = "requires a live system bus"]
+    async fn system_bus_connection_smoke() {
+        system_connection().await.unwrap();
+    }
+}
