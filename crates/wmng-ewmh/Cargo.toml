@@ -15,3 +15,7 @@ wmng-x11 = { path = "../wmng-x11" }
 # Core xproto only — EWMH is properties + client messages, no extensions.
 x11rb.workspace = true
 thiserror.workspace = true
+
+[[example]]
+name = "ewmh-smoke"
+path = "examples/smoke.rs"

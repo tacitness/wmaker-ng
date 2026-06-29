@@ -93,6 +93,9 @@ Languages, decided forensically for **performance and safety**:
 See [PLAN.md](PLAN.md) for the full mapping, repository topology, packaging,
 and the one-month roadmap.
 
+Daily-driver acceptance gates and measurement loops live in
+[docs/daily-driving-readiness.md](docs/daily-driving-readiness.md).
+
 
 Status
 ======

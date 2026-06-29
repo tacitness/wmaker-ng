@@ -5,10 +5,12 @@
 //!
 //! Not a `#[test]` on purpose: it needs a live X server, which CI does not have.
 
+use std::sync::Arc;
+
 use wmng_x11::X;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let x = X::connect()?;
+    let x = Arc::new(X::connect()?);
     let (w, h) = x.dimensions();
     println!(
         "[connect] {w}x{h} depth={} bpp={} shm={}",

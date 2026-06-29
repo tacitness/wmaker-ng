@@ -16,6 +16,9 @@ pub enum Error {
 
     #[error("EWMH property unavailable or malformed: {0}")]
     Property(&'static str),
+
+    #[error("window manager does not advertise EWMH support for {0}")]
+    Unsupported(&'static str),
 }
 
 /// Convenience alias for results from this crate.

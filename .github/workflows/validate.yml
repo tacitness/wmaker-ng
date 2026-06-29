@@ -17,7 +17,7 @@ env:
 jobs:
   fmt-check:
     name: Format check
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -28,7 +28,7 @@ jobs:
 
   clippy:
     name: Clippy (deny warnings)
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -40,7 +40,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -51,7 +51,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -62,25 +62,47 @@ jobs:
 
   audit:
     name: cargo-audit (RUSTSEC)
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: stable
+      - name: Install cargo-audit
+        run: |
+          set -euo pipefail
+          url="https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz"
+          sha256="ab28a1bdb54db4d5d8ad5981cf1f959410370b3d28250dbd35f6a44248620e39"
+          curl -fsSL "$url" -o cargo-audit.tgz
+          echo "$sha256  cargo-audit.tgz" | sha256sum -c -
+          tar -xzf cargo-audit.tgz
+          mkdir -p "$HOME/.cargo/bin"
+          install -m 0755 cargo-audit-x86_64-unknown-linux-gnu-v0.22.2/cargo-audit "$HOME/.cargo/bin/cargo-audit"
+      - run: cargo audit
 
   deny:
     name: cargo-deny (supply chain / licenses)
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe  # v2.0.20 (cargo-deny 0.19.8)
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
-          command: check
+          toolchain: stable
+      - name: Install cargo-deny
+        run: |
+          set -euo pipefail
+          url="https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.8/cargo-deny-0.19.8-x86_64-unknown-linux-musl.tar.gz"
+          sha256="70e769ae3872e34d45132b17040859175e11401dc12dddb0303e0b8c7d088f3f"
+          curl -fsSL "$url" -o cargo-deny.tar.gz
+          echo "$sha256  cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf cargo-deny.tar.gz
+          mkdir -p "$HOME/.cargo/bin"
+          install -m 0755 cargo-deny-0.19.8-x86_64-unknown-linux-musl/cargo-deny "$HOME/.cargo/bin/cargo-deny"
+      - run: cargo deny check
 
   secret-scan:
     name: Secret scan (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: wmaker-ng-ci-build
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:

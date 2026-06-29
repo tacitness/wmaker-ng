@@ -39,6 +39,7 @@ dependencies = [
 name = "ai-proto"
 version = "0.0.0"
 dependencies = [
+ "png",
  "serde",
  "serde_json",
  "thiserror",

@@ -15,3 +15,7 @@ x11rb = { workspace = true, features = ["damage", "xtest", "shm", "xfixes"] }
 libc.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[[example]]
+name = "x11-smoke"
+path = "examples/smoke.rs"
