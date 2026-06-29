@@ -62,7 +62,7 @@ base64 = "0.22.1"
 libc = "0.2"
 
 # Common error / logging plumbing (house style across the workspace).
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
