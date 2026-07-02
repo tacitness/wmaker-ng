@@ -180,6 +180,11 @@ sandbox-image: ## Build the wmaker-ai sandbox image (needs wmaker-crm:headless b
 	rm -f $(ROOT_DIR)/sandbox/ai-mcp
 	@echo "Built wmaker-ai-sandbox (base: wmaker-crm:headless)"
 
+.PHONY: sandbox-browser-image
+sandbox-browser-image: sandbox-image ## Build wmaker-ai-browser (Brave+Chromium on the wmaker desktop, #20)
+	docker build -t wmaker-ai-browser $(ROOT_DIR)/sandbox/browser
+	@echo "Built wmaker-ai-browser (base: wmaker-ai-sandbox)"
+
 # ── Release (tag-only versioning) ─────────────────────────────────────────────
 _VER_MAJOR := $(shell echo $(_BASE_VER) | cut -d. -f1)
 _VER_MINOR := $(shell echo $(_BASE_VER) | cut -d. -f2)
