@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 # ============================================================================
-# publish-aur.sh — render and push AUR -bin packages from release tarballs.
+# publish-aur.sh — render and push AUR -bin packages from static tarballs.
 #
 # Usage:
-#   scripts/publish-aur.sh <tarball-dir> <version>
+#   scripts/publish-aur.sh <static-release-dir> <version>
 #
-# Required tarballs:
-#   wmaker-ng-<version>-amd64-gnu.tar.gz[.sha256]
-#   wmaker-ng-<version>-arm64-gnu.tar.gz[.sha256]
+# Required static tarballs:
+#   wmaker-ng-<version>-amd64-musl.tar.zst[.sha256]
+#   wmaker-ng-<version>-arm64-musl.tar.zst[.sha256]
 #
 # Set AUR_DRY_RUN=1 to render packages under dist/aur without cloning/pushing.
 # ============================================================================
 set -euo pipefail
 
-TARBALL_DIR="${1:?usage: publish-aur.sh <tarball-dir> <version>}"
+TARBALL_DIR="${1:?usage: publish-aur.sh <static-release-dir> <version>}"
 PKGVER="${2:?missing version}"
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 AUR_BASE="${AUR_BASE:-ssh://aur@aur.archlinux.org}"
 AUR_DRY_RUN="${AUR_DRY_RUN:-0}"
 
-amd64_tar="wmaker-ng-$PKGVER-amd64-gnu.tar.gz"
-arm64_tar="wmaker-ng-$PKGVER-arm64-gnu.tar.gz"
+amd64_tar="wmaker-ng-$PKGVER-amd64-musl.tar.zst"
+arm64_tar="wmaker-ng-$PKGVER-arm64-musl.tar.zst"
 amd64_sum="$TARBALL_DIR/$amd64_tar.sha256"
 arm64_sum="$TARBALL_DIR/$arm64_tar.sha256"
 
@@ -56,8 +56,8 @@ render_package() {
 
 	sed -i \
 		-e "s/^pkgver=.*/pkgver=$PKGVER/" \
-		-e "s#wmaker-ng-[0-9][^-/]*-amd64-gnu.tar.gz#wmaker-ng-$PKGVER-amd64-gnu.tar.gz#g" \
-		-e "s#wmaker-ng-[0-9][^-/]*-arm64-gnu.tar.gz#wmaker-ng-$PKGVER-arm64-gnu.tar.gz#g" \
+		-e "s#wmaker-ng-[0-9][^-/]*-amd64-musl.tar.zst#wmaker-ng-$PKGVER-amd64-musl.tar.zst#g" \
+		-e "s#wmaker-ng-[0-9][^-/]*-arm64-musl.tar.zst#wmaker-ng-$PKGVER-arm64-musl.tar.zst#g" \
 		-e "s#/v[0-9][^/]*/#/v$PKGVER/#g" \
 		-e "s/sha256sums_x86_64=(.*/sha256sums_x86_64=('$AMD64_SHA')/" \
 		-e "s/sha256sums_aarch64=(.*/sha256sums_aarch64=('$ARM64_SHA')/" \
@@ -65,8 +65,8 @@ render_package() {
 
 	sed -i \
 		-e "s/^\tpkgver = .*/\tpkgver = $PKGVER/" \
-		-e "s#wmaker-ng-[0-9][^-/]*-amd64-gnu.tar.gz#wmaker-ng-$PKGVER-amd64-gnu.tar.gz#g" \
-		-e "s#wmaker-ng-[0-9][^-/]*-arm64-gnu.tar.gz#wmaker-ng-$PKGVER-arm64-gnu.tar.gz#g" \
+		-e "s#wmaker-ng-[0-9][^-/]*-amd64-musl.tar.zst#wmaker-ng-$PKGVER-amd64-musl.tar.zst#g" \
+		-e "s#wmaker-ng-[0-9][^-/]*-arm64-musl.tar.zst#wmaker-ng-$PKGVER-arm64-musl.tar.zst#g" \
 		-e "s#/v[0-9][^/]*/#/v$PKGVER/#g" \
 		-e "s/^\tsha256sums_x86_64 = .*/\tsha256sums_x86_64 = $AMD64_SHA/" \
 		-e "s/^\tsha256sums_aarch64 = .*/\tsha256sums_aarch64 = $ARM64_SHA/" \

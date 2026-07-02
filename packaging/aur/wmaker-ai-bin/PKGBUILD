@@ -9,15 +9,15 @@ license=('GPL-2.0-or-later')
 depends=('wmaker-ng-bin')
 provides=('wmaker-ai')
 conflicts=('wmaker-ai')
-source_x86_64=("wmaker-ng-${pkgver}-amd64-gnu.tar.gz::${url}/releases/download/v${pkgver}/wmaker-ng-${pkgver}-amd64-gnu.tar.gz")
-source_aarch64=("wmaker-ng-${pkgver}-arm64-gnu.tar.gz::${url}/releases/download/v${pkgver}/wmaker-ng-${pkgver}-arm64-gnu.tar.gz")
+source_x86_64=("wmaker-ng-${pkgver}-amd64-musl.tar.zst::${url}/releases/download/v${pkgver}/wmaker-ng-${pkgver}-amd64-musl.tar.zst")
+source_aarch64=("wmaker-ng-${pkgver}-arm64-musl.tar.zst::${url}/releases/download/v${pkgver}/wmaker-ng-${pkgver}-arm64-musl.tar.zst")
 sha256sums_x86_64=('SKIP')
 sha256sums_aarch64=('SKIP')
 
 package() {
-  local stage="wmaker-ng-${pkgver}-amd64-gnu"
+  local stage="wmaker-ng-${pkgver}-amd64-musl"
   if [[ "${CARCH}" == "aarch64" ]]; then
-    stage="wmaker-ng-${pkgver}-arm64-gnu"
+    stage="wmaker-ng-${pkgver}-arm64-musl"
   fi
 
   install -Dm0755 "${srcdir}/${stage}/ai-mcp" "${pkgdir}/usr/bin/ai-mcp"

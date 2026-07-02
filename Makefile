@@ -152,6 +152,10 @@ tarballs: ## Package staged binaries into portable tarballs → dist/tarballs
 	scripts/tarball.sh amd64 musl amd64-musl
 	scripts/tarball.sh arm64 musl arm64-musl
 
+.PHONY: static-channel
+static-channel: tarballs ## Build the static .tar.zst channel → dist/static
+	scripts/static-channel.sh $(DIST_DIR)/tarballs $(PKG_VERSION) $(DIST_DIR)/static
+
 # ── Repository assembly + signing ─────────────────────────────────────────────
 # Signing is keyed off GPG_KEY_ID (apt/rpm) and ABUILD_KEY (apk); unset = local
 # unsigned build. apk assembly needs an Alpine host (apk + abuild-sign).
@@ -169,7 +173,7 @@ publish: ## rsync the assembled repos → repos.tacitsoft.dev (needs deploy key)
 	scripts/publish.sh $(DIST_DIR)/repo
 
 .PHONY: release-local
-release-local: cross-build packages tarballs ## Full release build, no publish (CI parity sans signing)
+release-local: cross-build packages static-channel ## Full release build, no publish (CI parity sans signing)
 
 # ── Sandbox image (#18): Xvfb + wmaker + ai-mcp ───────────────────────────────
 .PHONY: sandbox-image
