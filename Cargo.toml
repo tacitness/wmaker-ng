@@ -57,6 +57,7 @@ schemars = "1.2.1"
 # Screenshot encoding for the MCP screenshot tool.
 png = "0.18.1"
 base64 = "0.22.1"
+lz4_flex = "0.11.5"
 
 # MIT-SHM shared-memory segment management (wmng-x11 capture path).
 libc = "0.2"

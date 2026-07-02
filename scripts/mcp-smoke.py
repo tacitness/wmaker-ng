@@ -19,6 +19,7 @@ import time
 
 REQUIRED_TOOLS = {
     "changed_regions",
+    "changed_regions_fast",
     "click",
     "focus",
     "key",
@@ -190,12 +191,35 @@ def next_delta(mcp, screen_area, window_id):
     for name, args in attempts:
         call_tool(mcp, name, args)
         time.sleep(0.5)
+        started = time.monotonic()
         update = text_json(call_tool(mcp, "changed_regions"))
+        update["_call_ms"] = int((time.monotonic() - started) * 1000)
         if update["kind"] == "delta" and update.get("regions"):
             assert_delta(update, screen_area)
             return update
         last = update
     raise RuntimeError("could not produce a non-empty delta: {}".format(summarize_update(last or {})))
+
+
+def next_fast_delta(mcp, screen_area, window_id):
+    attempts = [
+        ("move_resize", {"window": window_id, "x": 120, "y": 120, "width": 500, "height": 230}),
+        ("type", {"text": " fast"}),
+        ("move_resize", {"window": window_id, "x": 260, "y": 210, "width": 520, "height": 250}),
+    ]
+    last = None
+    for name, args in attempts:
+        call_tool(mcp, name, args)
+        time.sleep(0.25)
+        started = time.monotonic()
+        update = text_json(call_tool(mcp, "changed_regions_fast"))
+        update["_call_ms"] = int((time.monotonic() - started) * 1000)
+        if update["kind"] == "delta" and update.get("regions"):
+            if update.get("dirty_area", 0) >= screen_area:
+                raise RuntimeError("fast delta was not smaller than the full screen: {}".format(update))
+            return update
+        last = update
+    raise RuntimeError("could not produce a non-empty fast delta: {}".format(last or {}))
 
 
 def main():
@@ -243,15 +267,24 @@ def main():
         screenshot_bytes = image_size(call_tool(mcp, "screenshot"))
         if screenshot_bytes <= 0:
             raise RuntimeError("screenshot returned an empty PNG payload")
+        fast_delta = next_fast_delta(mcp, screen_area, window_id)
 
         print(
-            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} screenshot_b64_bytes={}".format(
+            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} screenshot_b64_bytes={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
                 args.display,
                 init.get("protocolVersion", "<unknown>"),
                 window_id,
                 len(first["regions"]),
                 len(first_delta["regions"]),
+                sum(len(region.get("png_base64", "")) for region in first_delta.get("regions", [])),
+                first_delta.get("_call_ms"),
                 screenshot_bytes,
+                len(fast_delta["regions"]),
+                fast_delta.get("encoded_bytes"),
+                fast_delta.get("_call_ms"),
+                fast_delta.get("timings", {}).get("total_ms"),
+                fast_delta.get("timings", {}).get("capture_ms"),
+                fast_delta.get("timings", {}).get("encode_ms"),
             )
         )
         return 0

@@ -18,7 +18,7 @@ mod capture;
 mod damage;
 mod error;
 
-pub use capture::{Capture, Frame};
+pub use capture::{Capture, Frame, SharedCapture};
 pub use damage::DamageFeed;
 pub use error::{Error, Result};
 
@@ -192,6 +192,11 @@ impl X {
     /// Build a reusable root-window capturer (SHM when available).
     pub fn capture(&self) -> Result<Capture<'_>> {
         Capture::new(self)
+    }
+
+    /// Build a reusable root-window capturer owned by the shared X connection.
+    pub fn shared_capture(self: &Arc<Self>) -> Result<SharedCapture> {
+        SharedCapture::new(self.clone())
     }
 
     /// Subscribe to the root-window damage stream.

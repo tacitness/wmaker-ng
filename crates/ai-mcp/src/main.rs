@@ -7,7 +7,7 @@
 //! Window Maker desktop; the WM never learns it is being driven.
 
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ai_proto::{DiffConfig, DiffEncoder, ScreenUpdate};
 use base64::Engine as _;
@@ -18,12 +18,13 @@ use rmcp::{ServiceExt, tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wmng_ewmh::{Ewmh, TileSlot};
-use wmng_x11::{DamageFeed, X};
+use wmng_x11::{DamageFeed, SharedCapture, X};
 
 /// The MCP server: holds the shared X connection. Cheap to clone (Arc).
 #[derive(Clone)]
 struct WmCtl {
     x: Arc<X>,
+    capture: Arc<Mutex<SharedCapture>>,
     diff: Arc<Mutex<DiffEncoder>>,
     damage: Arc<Mutex<DamageFeed>>,
 }
@@ -141,6 +142,42 @@ struct ScreenUpdateOut {
     regions: Vec<RegionOut>,
 }
 
+#[derive(Serialize, JsonSchema)]
+struct TimingOut {
+    capture_ms: u128,
+    damage_ms: u128,
+    encode_ms: u128,
+    serialize_ms: u128,
+    total_ms: u128,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct RawRegionOut {
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    stride: u32,
+    encoding: String,
+    data_base64: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ScreenUpdateFastOut {
+    kind: String,
+    width: u16,
+    height: u16,
+    bytes_per_pixel: u8,
+    pixel_format: String,
+    dirty_area: u32,
+    rebaseline_reason: Option<String>,
+    needs_keyframe: bool,
+    encoded_bytes: usize,
+    raw_bytes: usize,
+    timings: TimingOut,
+    regions: Vec<RawRegionOut>,
+}
+
 #[tool_router(server_handler)]
 impl WmCtl {
     // ── Input synthesis (XTEST) ──────────────────────────────────────────────
@@ -238,12 +275,14 @@ impl WmCtl {
     // ── Capture (XShm) ───────────────────────────────────────────────────────
     #[tool(description = "Capture the screen and return it as a PNG image.")]
     async fn screenshot(&self) -> Result<CallToolResult, ErrorData> {
-        let x = self.x.clone();
+        let capture = self.capture.clone();
+        let diff = self.diff.clone();
         run(move || {
-            let mut cap = x.capture().map_err(to_err)?;
+            let mut cap = capture.lock().map_err(lock_err)?;
             let frame = cap.frame().map_err(to_err)?;
             let png = ai_proto::encode_full_png(&frame).map_err(to_err)?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+            diff.lock().map_err(lock_err)?.note_keyframe();
             Ok(CallToolResult::success(vec![Content::image(
                 b64,
                 "image/png",
@@ -257,12 +296,12 @@ impl WmCtl {
         description = "Return XDamage dirty rectangles as PNG crops, with keyframe re-baseline when needed."
     )]
     async fn changed_regions(&self) -> Result<Json<ScreenUpdateOut>, ErrorData> {
-        let x = self.x.clone();
+        let capture = self.capture.clone();
         let diff = self.diff.clone();
         let damage = self.damage.clone();
         run(move || {
-            let mut cap = x.capture().map_err(to_err)?;
             let dirty = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
+            let mut cap = capture.lock().map_err(lock_err)?;
             let frame = cap.frame().map_err(to_err)?;
             let update = diff
                 .lock()
@@ -270,6 +309,62 @@ impl WmCtl {
                 .changed_regions(&frame, &dirty)
                 .map_err(to_err)?;
             Ok(Json(to_screen_update_out(update)))
+        })
+        .await
+    }
+
+    #[tool(
+        name = "changed_regions_fast",
+        description = "Return XDamage dirty rectangles as raw X11 ZPixmap crops, avoiding PNG compression for low-latency local observation."
+    )]
+    async fn changed_regions_fast(&self) -> Result<Json<ScreenUpdateFastOut>, ErrorData> {
+        let capture = self.capture.clone();
+        let diff = self.diff.clone();
+        let damage = self.damage.clone();
+        run(move || {
+            let total_start = Instant::now();
+
+            let capture_start = Instant::now();
+            let mut cap = capture.lock().map_err(lock_err)?;
+            let frame = cap.frame().map_err(to_err)?;
+            let capture_ms = capture_start.elapsed().as_millis();
+
+            let damage_start = Instant::now();
+            let dirty = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
+            let damage_ms = damage_start.elapsed().as_millis();
+
+            let encode_start = Instant::now();
+            let update = diff
+                .lock()
+                .map_err(lock_err)?
+                .changed_regions_raw(&frame, &dirty)
+                .map_err(to_err)?;
+            let encode_ms = encode_start.elapsed().as_millis();
+
+            let serialize_start = Instant::now();
+            let out = to_screen_update_fast_out(
+                update,
+                TimingOut {
+                    capture_ms,
+                    damage_ms,
+                    encode_ms,
+                    serialize_ms: 0,
+                    total_ms: 0,
+                },
+            );
+            let serialize_ms = serialize_start.elapsed().as_millis();
+            let total_ms = total_start.elapsed().as_millis();
+
+            Ok(Json(ScreenUpdateFastOut {
+                timings: TimingOut {
+                    capture_ms,
+                    damage_ms,
+                    encode_ms,
+                    serialize_ms,
+                    total_ms,
+                },
+                ..out
+            }))
         })
         .await
     }
@@ -315,6 +410,50 @@ fn to_screen_update_out(update: ScreenUpdate) -> ScreenUpdateOut {
     }
 }
 
+fn to_screen_update_fast_out(
+    update: ai_proto::RawScreenUpdate,
+    timings: TimingOut,
+) -> ScreenUpdateFastOut {
+    let mut raw_bytes = 0usize;
+    let mut encoded_bytes = 0usize;
+    let regions = update
+        .regions
+        .into_iter()
+        .map(|r| {
+            raw_bytes += r.bytes.len();
+            let compressed = lz4_flex::compress_prepend_size(&r.bytes);
+            let data_base64 = base64::engine::general_purpose::STANDARD.encode(compressed);
+            encoded_bytes += data_base64.len();
+            RawRegionOut {
+                x: r.rect.x,
+                y: r.rect.y,
+                width: r.rect.width,
+                height: r.rect.height,
+                stride: r.stride,
+                encoding: "lz4_flex_size_prepended_x11_zpixmap_native_bgrx".to_string(),
+                data_base64,
+            }
+        })
+        .collect();
+
+    ScreenUpdateFastOut {
+        kind: format!("{:?}", update.kind).to_ascii_lowercase(),
+        width: update.width,
+        height: update.height,
+        bytes_per_pixel: update.bytes_per_pixel,
+        pixel_format: "x11_zpixmap_native_bgrx".to_string(),
+        dirty_area: update.dirty_area,
+        rebaseline_reason: update
+            .rebaseline_reason
+            .map(|r| format!("{r:?}").to_ascii_lowercase()),
+        needs_keyframe: update.needs_keyframe,
+        encoded_bytes,
+        raw_bytes,
+        timings,
+        regions,
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -333,10 +472,12 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let x = Arc::new(X::connect()?);
+    let capture = Arc::new(Mutex::new(x.shared_capture()?));
     let damage = Arc::new(Mutex::new(x.damage_feed()?));
     tracing::info!("ai-mcp: connected to X, serving MCP over stdio");
     let service = WmCtl {
         x,
+        capture,
         diff: Arc::new(Mutex::new(DiffEncoder::new(diff_config_from_env()))),
         damage,
     }
