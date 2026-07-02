@@ -72,3 +72,16 @@ static channel:
 
 The installer detects `x86_64`/`aarch64`, fetches the matching static archive,
 verifies the sha256, and installs binaries into `${PREFIX:-/usr/local}/bin`.
+
+## Gentoo Overlay
+
+`packaging/gentoo/` is a minimal Gentoo overlay fed by the same static `.tar.zst`
+artifacts:
+
+- `x11-wm/wmaker-ng` installs the `ng-*` daemons and depends on UDisks2/UPower.
+- `x11-wm/wmaker-ai` installs `ai-mcp` and depends on the matching
+  `wmaker-ng` version.
+
+This is intentionally the low-maintenance binary path for M4. A source ebuild
+using `cargo.eclass` and vendored crate metadata can come later if Gentoo users
+ask for a source-build package.
