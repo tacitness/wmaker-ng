@@ -116,7 +116,7 @@ jobs:
       - name: Derive version from tag
         run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - name: Install repo tooling
-        run: sudo apt-get update && sudo apt-get install -y reprepro createrepo-c rpm gnupg
+        run: sudo apt-get update && sudo apt-get install -y reprepro createrepo-c rpm gnupg zstd
 
       - name: Configure AWS credentials (OIDC)
         if: env.HAS_AWS == 'true'
@@ -152,6 +152,9 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w $keyenv alpine:3.22 sh -c \
             'apk add --no-cache bash abuild >/dev/null && bash scripts/repo-apk.sh dist/repo/apk dist/pkg'
 
+      - name: Assemble static tar.zst channel
+        run: scripts/static-channel.sh dist/tarballs "$PKG_VERSION" dist/repo/static
+
       - name: Publish repos to repos.tacitsoft.dev
         if: env.HAS_AWS == 'true'
         run: |
@@ -168,7 +171,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            dist/tarballs/* dist/pkg/*
+            dist/tarballs/* dist/pkg/* dist/repo/static/install.sh dist/repo/static/releases/$PKG_VERSION/*
 
       - name: Publish AUR packages
         if: env.HAS_AUR == 'true'
@@ -179,4 +182,4 @@ jobs:
             --query SecretString --output text | ssh-add -
           mkdir -p ~/.ssh
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-          scripts/publish-aur.sh dist/tarballs "$PKG_VERSION"
+          scripts/publish-aur.sh dist/repo/static/releases/$PKG_VERSION "$PKG_VERSION"

@@ -53,6 +53,22 @@ artifacts instead of rebuilding from source:
 - `wmaker-ai-bin` installs `ai-mcp` and depends on `wmaker-ng-bin`.
 
 The committed package files use the early release baseline version and `SKIP`
-checksums. During a tag release, `scripts/publish-aur.sh` renders the actual
-tag version and sha256sums from `dist/tarballs/*.sha256` before pushing to the
-AUR git remotes.
+checksums. During a tag release, `scripts/static-channel.sh` creates musl
+`.tar.zst` artifacts, then `scripts/publish-aur.sh` renders the actual tag
+version and sha256sums before pushing to the AUR git remotes.
+
+## Static Tarballs
+
+`scripts/static-channel.sh` promotes the musl tarballs into a distro-agnostic
+static channel:
+
+- `releases/<version>/wmaker-ng-<version>-amd64-musl.tar.zst`
+- `releases/<version>/wmaker-ng-<version>-arm64-musl.tar.zst`
+- per-artifact `.sha256` files
+- `manifest.json`
+- `VERSION`
+- `latest -> releases/<version>`
+- `install.sh`
+
+The installer detects `x86_64`/`aarch64`, fetches the matching static archive,
+verifies the sha256, and installs binaries into `${PREFIX:-/usr/local}/bin`.

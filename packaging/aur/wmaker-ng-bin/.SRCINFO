@@ -10,9 +10,9 @@ pkgbase = wmaker-ng-bin
 	optdepends = upower: battery and power-device state for ng-power
 	provides = wmaker-ng
 	conflicts = wmaker-ng
-	source_x86_64 = wmaker-ng-0.1.0-amd64-gnu.tar.gz::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-amd64-gnu.tar.gz
+	source_x86_64 = wmaker-ng-0.1.0-amd64-musl.tar.zst::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-amd64-musl.tar.zst
 	sha256sums_x86_64 = SKIP
-	source_aarch64 = wmaker-ng-0.1.0-arm64-gnu.tar.gz::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-arm64-gnu.tar.gz
+	source_aarch64 = wmaker-ng-0.1.0-arm64-musl.tar.zst::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-arm64-musl.tar.zst
 	sha256sums_aarch64 = SKIP
 
 pkgname = wmaker-ng-bin

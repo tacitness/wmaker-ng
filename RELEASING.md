@@ -27,8 +27,9 @@ into packages by [`nfpm`](https://nfpm.goreleaser.com):
 | `*-linux-gnu.2.34` (amd64, arm64)   | deb, rpm   | EL9, EL10, Fedora (latest-2), Debian 12/13, Ubuntu 22.04/24.04 LTS    |
 | `*-linux-musl` static (amd64, arm64)| apk        | Alpine (current stable; musl is distro-agnostic)                      |
 
-Plus portable `.tar.gz` + `.sha256` per arch/libc, attached to the GitHub
-Release (the "compiled binaries" artifact; also seeds the AUR/static channels).
+Plus portable `.tar.gz` + `.sha256` per arch/libc and a first-class static
+`.tar.zst` channel from the musl builds. Static artifacts attach to the GitHub
+Release and publish under `repos.tacitsoft.dev/wmaker-ng/static/`.
 
 Architectures: **x86_64** and **aarch64**. Non-EOL versions as of this writing —
 revisit when distros roll.
@@ -44,8 +45,10 @@ revisit when distros roll.
    - **rpm** — `rpm --addsign` packages + `createrepo_c` + signed `repomd.xml` (GPG).
    - **apk** — `APKINDEX` signed with `abuild-sign` (RSA) in an Alpine container.
    - **publish** — `rsync` to `repos.tacitsoft.dev` under `/srv/repos/wmaker-ng/`.
+   - **static** — `.tar.zst`, `manifest.json`, `latest`, and `install.sh` under
+     `/static`.
    - **AUR** — optionally render `wmaker-ng-bin` / `wmaker-ai-bin` from the
-     GitHub Release tarball sha256sums and push to the AUR git remotes.
+     static `.tar.zst` sha256sums and push to the AUR git remotes.
 
 ## Secrets — OIDC + AWS Secrets Manager (house pattern)
 
@@ -88,7 +91,7 @@ hook falls back to a built-in regex scan if gitleaks is absent.
 ```bash
 make release-local   # cross-build + packages + tarballs into dist/
 make repo-apt repo-rpm   # assemble unsigned apt/rpm repos locally
-AUR_DRY_RUN=1 scripts/publish-aur.sh dist/tarballs "$PKG_VERSION"  # render AUR files, no push
+AUR_DRY_RUN=1 scripts/publish-aur.sh dist/static/releases/"$PKG_VERSION" "$PKG_VERSION"  # render AUR files, no push
 ```
 
 `make repo-apk` needs an Alpine host (`apk` + `abuild-sign`). Cross-builds need
@@ -124,4 +127,7 @@ sudo apk update && sudo apk add wmaker-ng
 
 # Arch Linux / AUR
 paru -S wmaker-ng-bin   # optional: wmaker-ai-bin
+
+# Static tar.zst channel
+curl -fsSL https://repos.tacitsoft.dev/wmaker-ng/static/install.sh | sh
 ```
