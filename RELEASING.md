@@ -49,6 +49,8 @@ revisit when distros roll.
      `/static`.
    - **AUR** — optionally render `wmaker-ng-bin` / `wmaker-ai-bin` from the
      static `.tar.zst` sha256sums and push to the AUR git remotes.
+   - **Gentoo** — overlay ebuilds under `packaging/gentoo/`, fed by the same
+     static `.tar.zst` release artifacts.
 
 ## Secrets — OIDC + AWS Secrets Manager (house pattern)
 
@@ -130,4 +132,9 @@ paru -S wmaker-ng-bin   # optional: wmaker-ai-bin
 
 # Static tar.zst channel
 curl -fsSL https://repos.tacitsoft.dev/wmaker-ng/static/install.sh | sh
+
+# Gentoo overlay
+sudo install -d /var/db/repos/wmaker-ng
+sudo rsync -a packaging/gentoo/ /var/db/repos/wmaker-ng/
+sudo emerge x11-wm/wmaker-ng   # optional: x11-wm/wmaker-ai
 ```

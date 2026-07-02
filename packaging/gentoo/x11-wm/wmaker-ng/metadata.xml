@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+  <maintainer type="project">
+    <email>ops@tacitsoft.dev</email>
+    <name>The wmaker-ng Team</name>
+  </maintainer>
+  <longdescription>
+    Modern Linux integration companions for GNU Window Maker: automount,
+    power/session, and notification daemons.
+  </longdescription>
+</pkgmetadata>
