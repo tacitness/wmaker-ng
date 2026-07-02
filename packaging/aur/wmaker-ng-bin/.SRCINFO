@@ -1,0 +1,18 @@
+pkgbase = wmaker-ng-bin
+	pkgdesc = Modern Linux integration companions for GNU Window Maker
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/tacitness/wmaker-ng
+	arch = x86_64
+	arch = aarch64
+	license = GPL-2.0-or-later
+	optdepends = udisks2: removable-media events for ng-automount
+	optdepends = upower: battery and power-device state for ng-power
+	provides = wmaker-ng
+	conflicts = wmaker-ng
+	source_x86_64 = wmaker-ng-0.1.0-amd64-gnu.tar.gz::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-amd64-gnu.tar.gz
+	sha256sums_x86_64 = SKIP
+	source_aarch64 = wmaker-ng-0.1.0-arm64-gnu.tar.gz::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-arm64-gnu.tar.gz
+	sha256sums_aarch64 = SKIP
+
+pkgname = wmaker-ng-bin
