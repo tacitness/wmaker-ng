@@ -138,6 +138,17 @@ impl X {
         Ok(())
     }
 
+    /// Move the pointer, then click one or more times.
+    pub fn click_at(&self, x: i16, y: i16, button: u8, count: u8) -> Result<()> {
+        self.move_pointer(x, y)?;
+        for _ in 0..count.max(1) {
+            self.button(button, true)?;
+            self.button(button, false)?;
+        }
+        self.conn.flush()?;
+        Ok(())
+    }
+
     /// Press or release a single pointer button.
     pub fn button(&self, button: u8, press: bool) -> Result<()> {
         let ty = if press {
@@ -147,6 +158,38 @@ impl X {
         };
         self.conn
             .xtest_fake_input(ty, button, 0, self.root, 0, 0, 0)?;
+        Ok(())
+    }
+
+    /// Synthesize wheel scrolling. Positive `dy` scrolls down, negative up;
+    /// positive `dx` scrolls right, negative left.
+    pub fn scroll(&self, dx: i16, dy: i16) -> Result<()> {
+        self.scroll_axis(dy, 5, 4)?;
+        self.scroll_axis(dx, 7, 6)?;
+        self.conn.flush()?;
+        Ok(())
+    }
+
+    fn scroll_axis(&self, delta: i16, positive_button: u8, negative_button: u8) -> Result<()> {
+        let button = if delta >= 0 {
+            positive_button
+        } else {
+            negative_button
+        };
+        for _ in 0..delta.unsigned_abs() {
+            self.button(button, true)?;
+            self.button(button, false)?;
+        }
+        Ok(())
+    }
+
+    /// Drag from one absolute root coordinate to another.
+    pub fn drag(&self, x1: i16, y1: i16, x2: i16, y2: i16, button: u8) -> Result<()> {
+        self.move_pointer(x1, y1)?;
+        self.button(button, true)?;
+        self.move_pointer(x2, y2)?;
+        self.button(button, false)?;
+        self.conn.flush()?;
         Ok(())
     }
 
@@ -162,6 +205,38 @@ impl X {
         self.key_code(keycode, false)?;
         if shifted && shift != 0 {
             self.key_code(shift, false)?;
+        }
+        self.conn.flush()?;
+        Ok(())
+    }
+
+    /// Press modifiers, tap a key, then release modifiers in reverse order.
+    pub fn key_combo(&self, modifiers: &[u32], keysym: u32) -> Result<()> {
+        let modifier_keycodes = modifiers
+            .iter()
+            .map(|keysym| {
+                self.keymap
+                    .lookup(*keysym)
+                    .map(|(keycode, _)| keycode)
+                    .ok_or(Error::NoKeycode(*keysym))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let (keycode, shifted) = self.keymap.lookup(keysym).ok_or(Error::NoKeycode(keysym))?;
+        let shift = self.keymap.shift;
+
+        for keycode in &modifier_keycodes {
+            self.key_code(*keycode, true)?;
+        }
+        if shifted && shift != 0 && !modifier_keycodes.contains(&shift) {
+            self.key_code(shift, true)?;
+        }
+        self.key_code(keycode, true)?;
+        self.key_code(keycode, false)?;
+        if shifted && shift != 0 && !modifier_keycodes.contains(&shift) {
+            self.key_code(shift, false)?;
+        }
+        for keycode in modifier_keycodes.iter().rev() {
+            self.key_code(*keycode, false)?;
         }
         self.conn.flush()?;
         Ok(())
@@ -186,6 +261,16 @@ impl X {
             self.key(ch as u32)?;
         }
         Ok(())
+    }
+
+    /// Current pointer coordinates and the child window under the cursor.
+    pub fn pointer(&self) -> Result<PointerInfo> {
+        let reply = self.conn.query_pointer(self.root)?.reply()?;
+        Ok(PointerInfo {
+            x: reply.root_x,
+            y: reply.root_y,
+            child: (reply.child != 0).then_some(reply.child),
+        })
     }
 
     // ── Capture / damage / cursor ────────────────────────────────────────────
@@ -224,6 +309,13 @@ pub struct CursorImage {
     pub xhot: u16,
     pub yhot: u16,
     pub pixels: Vec<u32>,
+}
+
+/// Pointer position on the root window.
+pub struct PointerInfo {
+    pub x: i16,
+    pub y: i16,
+    pub child: Option<Window>,
 }
 
 /// keysym → (keycode, needs-shift), plus the Shift_L keycode.

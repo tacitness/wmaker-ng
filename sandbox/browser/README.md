@@ -44,6 +44,9 @@ docker run -i --rm -e START_URL=https://example.com wmaker-ai-browser
 | `BROWSER`         | `brave-browser`  | browser binary (`brave-browser` \| `chromium`) |
 | `START_URL`       | `about:blank`    | page opened on boot                           |
 | `USER_DATA_DIR`   | `/profile`       | `--user-data-dir`                             |
+| `DISPOSABLE_PROFILE` | `0`           | if `1`, use a throwaway profile under `/tmp`  |
+| `PROFILE_SEED_TARBALL` | unset       | optional secret-mounted profile seed tarball  |
+| `AUTH_ALLOWED_DOMAINS` | unset       | comma-separated host allowlist for `START_URL` |
 | `CLEAR_SINGLETON` | `0`              | if `1`, clear stale `Singleton*` locks in the profile |
 
 To carry over your real logins/bookmarks, bind-mount the host profile:
@@ -59,6 +62,9 @@ python3 scripts/drive-browser.py \
 > will refuse to start or race the running instance. For repeatable runs, prefer
 > a scoped/throwaway profile seeded from secrets — tracked in #21
 > (secrets-managed auth), the intended long-term path.
+
+See [AUTH.md](AUTH.md) for the secrets-managed disposable profile strategy and
+the mounted-seed implementation.
 
 ## Notes
 
