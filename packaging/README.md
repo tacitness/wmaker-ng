@@ -1,8 +1,8 @@
 # Packaging
 
 `nfpm` recipes that turn the release binaries into deb/rpm/apk packages for
-publication to `repos.tacitsoft.dev` (PLAN §7). Two packages map onto the
-facets:
+publication to `repos.tacitsoft.dev` (PLAN §7), plus AUR `-bin` package files
+fed by the release tarballs. Two packages map onto the facets:
 
 - **`wmaker-ng`** — the `ng-*` daemons (auto-mount, power, notify).
 - **`wmaker-ai`** — the `ai-mcp` server; `depends:` on `wmaker-ng`.
@@ -42,3 +42,17 @@ package binaries that gain behavior as the daemons are implemented (PLAN §8).
 
 Requires [`nfpm`](https://nfpm.goreleaser.com) and `cargo-zigbuild` + `zig`:
 see `make install-cross-tools`.
+
+## AUR
+
+`packaging/aur/wmaker-ng-bin/` and `packaging/aur/wmaker-ai-bin/` hold the AUR
+package files. They intentionally consume the GitHub Release `.tar.gz`
+artifacts instead of rebuilding from source:
+
+- `wmaker-ng-bin` installs `ng-automount`, `ng-power`, and `ng-notify`.
+- `wmaker-ai-bin` installs `ai-mcp` and depends on `wmaker-ng-bin`.
+
+The committed package files use the early release baseline version and `SKIP`
+checksums. During a tag release, `scripts/publish-aur.sh` renders the actual
+tag version and sha256sums from `dist/tarballs/*.sha256` before pushing to the
+AUR git remotes.

@@ -98,8 +98,10 @@ jobs:
       SM_GPG_KEY: ${{ vars.SM_GPG_KEY || '/tacitsoft/wmaker-ng/gpg-signing-key' }}
       SM_APK_KEY: ${{ vars.SM_APK_KEY || '/tacitsoft/wmaker-ng/apk-signing-key' }}
       SM_DEPLOY_KEY: ${{ vars.SM_DEPLOY_KEY || '/tacitsoft/wmaker-ng/repos-deploy-ssh-key' }}
+      SM_AUR_KEY: ${{ vars.SM_AUR_KEY || '/tacitsoft/wmaker-ng/aur-deploy-ssh-key' }}
       # Signing + publish activate once infra sets the AWS_ROLE_ARN repo variable.
       HAS_AWS: ${{ vars.AWS_ROLE_ARN != '' }}
+      HAS_AUR: ${{ vars.AUR_PUBLISH == 'true' && vars.AWS_ROLE_ARN != '' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -111,6 +113,8 @@ jobs:
         with:
           name: packages
           path: dist/pkg/
+      - name: Derive version from tag
+        run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - name: Install repo tooling
         run: sudo apt-get update && sudo apt-get install -y reprepro createrepo-c rpm gnupg
 
@@ -165,3 +169,14 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
             dist/tarballs/* dist/pkg/*
+
+      - name: Publish AUR packages
+        if: env.HAS_AUR == 'true'
+        run: |
+          set -euo pipefail
+          eval "$(ssh-agent -s)"
+          aws secretsmanager get-secret-value --secret-id "$SM_AUR_KEY" \
+            --query SecretString --output text | ssh-add -
+          mkdir -p ~/.ssh
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          scripts/publish-aur.sh dist/tarballs "$PKG_VERSION"

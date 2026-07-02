@@ -1,0 +1,33 @@
+# Maintainer: The wmaker-ng Team <ops@tacitsoft.dev>
+pkgname=wmaker-ng-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Modern Linux integration companions for GNU Window Maker'
+arch=('x86_64' 'aarch64')
+url='https://github.com/tacitness/wmaker-ng'
+license=('GPL-2.0-or-later')
+optdepends=(
+  'udisks2: removable-media events for ng-automount'
+  'upower: battery and power-device state for ng-power'
+)
+provides=('wmaker-ng')
+conflicts=('wmaker-ng')
+source_x86_64=("wmaker-ng-${pkgver}-amd64-gnu.tar.gz::${url}/releases/download/v${pkgver}/wmaker-ng-${pkgver}-amd64-gnu.tar.gz")
+source_aarch64=("wmaker-ng-${pkgver}-arm64-gnu.tar.gz::${url}/releases/download/v${pkgver}/wmaker-ng-${pkgver}-arm64-gnu.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  local stage="wmaker-ng-${pkgver}-amd64-gnu"
+  if [[ "${CARCH}" == "aarch64" ]]; then
+    stage="wmaker-ng-${pkgver}-arm64-gnu"
+  fi
+
+  install -Dm0755 "${srcdir}/${stage}/ng-automount" "${pkgdir}/usr/bin/ng-automount"
+  install -Dm0755 "${srcdir}/${stage}/ng-power" "${pkgdir}/usr/bin/ng-power"
+  install -Dm0755 "${srcdir}/${stage}/ng-notify" "${pkgdir}/usr/bin/ng-notify"
+
+  install -Dm0644 "${srcdir}/${stage}/README.md" "${pkgdir}/usr/share/doc/wmaker-ng/README.md"
+  install -Dm0644 "${srcdir}/${stage}/ARCHITECTURE.md" "${pkgdir}/usr/share/doc/wmaker-ng/ARCHITECTURE.md"
+  install -Dm0644 "${srcdir}/${stage}/ROADMAP.md" "${pkgdir}/usr/share/doc/wmaker-ng/ROADMAP.md"
+}

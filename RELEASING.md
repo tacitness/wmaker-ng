@@ -44,6 +44,8 @@ revisit when distros roll.
    - **rpm** — `rpm --addsign` packages + `createrepo_c` + signed `repomd.xml` (GPG).
    - **apk** — `APKINDEX` signed with `abuild-sign` (RSA) in an Alpine container.
    - **publish** — `rsync` to `repos.tacitsoft.dev` under `/srv/repos/wmaker-ng/`.
+   - **AUR** — optionally render `wmaker-ng-bin` / `wmaker-ai-bin` from the
+     GitHub Release tarball sha256sums and push to the AUR git remotes.
 
 ## Secrets — OIDC + AWS Secrets Manager (house pattern)
 
@@ -56,7 +58,9 @@ cuts the GitHub Release; it hardens automatically once infra wires the role.
 
 **Repo variable** (GitHub → Settings → Variables): `AWS_ROLE_ARN` = the OIDC
 role to assume (`us-west-2`). Optional overrides: `SM_GPG_KEY`, `SM_APK_KEY`,
-`SM_DEPLOY_KEY` if the Secrets Manager paths differ from the defaults below.
+`SM_DEPLOY_KEY`, `SM_AUR_KEY` if the Secrets Manager paths differ from the
+defaults below. Set `AUR_PUBLISH=true` only after the AUR package remotes and
+deploy key are provisioned.
 
 **Secrets Manager entries** (`us-west-2`, ops to provision):
 
@@ -65,6 +69,7 @@ role to assume (`us-west-2`). Optional overrides: `SM_GPG_KEY`, `SM_APK_KEY`,
 | `/tacitsoft/wmaker-ng/gpg-signing-key`       | Armored GPG **private** key — signs apt + rpm (key id derived on import) |
 | `/tacitsoft/wmaker-ng/apk-signing-key`       | abuild **RSA** private key — signs the apk `APKINDEX` |
 | `/tacitsoft/wmaker-ng/repos-deploy-ssh-key`  | SSH private key for `deploy@repos.tacitsoft.dev`    |
+| `/tacitsoft/wmaker-ng/aur-deploy-ssh-key`    | SSH private key for `aur@aur.archlinux.org` package remotes |
 
 > apt/rpm use **GPG**; apk uses a **separate RSA** key. The OIDC role's trust
 > policy must include `repo:tacitness/wmaker-ng:*` and its IAM policy must grant
@@ -83,6 +88,7 @@ hook falls back to a built-in regex scan if gitleaks is absent.
 ```bash
 make release-local   # cross-build + packages + tarballs into dist/
 make repo-apt repo-rpm   # assemble unsigned apt/rpm repos locally
+AUR_DRY_RUN=1 scripts/publish-aur.sh dist/tarballs "$PKG_VERSION"  # render AUR files, no push
 ```
 
 `make repo-apk` needs an Alpine host (`apk` + `abuild-sign`). Cross-builds need
@@ -115,4 +121,7 @@ echo "https://repos.tacitsoft.dev/wmaker-ng/apk/$(apk --print-arch)" \
   | sudo tee -a /etc/apk/repositories
 sudo wget -P /etc/apk/keys https://repos.tacitsoft.dev/wmaker-ng/apk/wmaker-ng.rsa.pub
 sudo apk update && sudo apk add wmaker-ng
+
+# Arch Linux / AUR
+paru -S wmaker-ng-bin   # optional: wmaker-ai-bin
 ```

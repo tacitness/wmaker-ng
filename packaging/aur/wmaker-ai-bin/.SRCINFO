@@ -1,0 +1,17 @@
+pkgbase = wmaker-ai-bin
+	pkgdesc = MCP AI control plane for GNU Window Maker
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/tacitness/wmaker-ng
+	arch = x86_64
+	arch = aarch64
+	license = GPL-2.0-or-later
+	depends = wmaker-ng-bin
+	provides = wmaker-ai
+	conflicts = wmaker-ai
+	source_x86_64 = wmaker-ng-0.1.0-amd64-gnu.tar.gz::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-amd64-gnu.tar.gz
+	sha256sums_x86_64 = SKIP
+	source_aarch64 = wmaker-ng-0.1.0-arm64-gnu.tar.gz::https://github.com/tacitness/wmaker-ng/releases/download/v0.1.0/wmaker-ng-0.1.0-arm64-gnu.tar.gz
+	sha256sums_aarch64 = SKIP
+
+pkgname = wmaker-ai-bin
