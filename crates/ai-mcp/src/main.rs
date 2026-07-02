@@ -169,6 +169,26 @@ fn ok() -> Json<Status> {
 struct WindowOut {
     id: u32,
     title: String,
+    class: Option<String>,
+    instance: Option<String>,
+    pid: Option<u32>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    workspace: Option<u32>,
+    mapped: bool,
+    minimized: bool,
+    maximized: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct WindowList {
+    windows: Vec<WindowOut>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct RectOut {
     x: i32,
     y: i32,
     width: u32,
@@ -176,8 +196,46 @@ struct WindowOut {
 }
 
 #[derive(Serialize, JsonSchema)]
-struct WindowList {
-    windows: Vec<WindowOut>,
+struct SceneWindowOut {
+    id: u32,
+    title: String,
+    class: Option<String>,
+    instance: Option<String>,
+    pid: Option<u32>,
+    geometry: RectOut,
+    workspace: Option<u32>,
+    mapped: bool,
+    minimized: bool,
+    maximized: bool,
+    active: bool,
+    under_pointer: bool,
+    stacking_index: Option<usize>,
+    transient_for: Option<u32>,
+    group_leader: Option<u32>,
+    capabilities: WindowCapabilitiesOut,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct WindowCapabilitiesOut {
+    ewmh_focus: bool,
+    ewmh_move_resize: bool,
+    ewmh_close: bool,
+    xtest_input: bool,
+    semantic_adapter: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct FocusOut {
+    active_window: Option<u32>,
+    pointer: PointerOut,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct DesktopSceneOut {
+    screen: RectOut,
+    focus: FocusOut,
+    stacking_order: Vec<u32>,
+    windows: Vec<SceneWindowOut>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -355,13 +413,90 @@ impl WmCtl {
                 .map(|w| WindowOut {
                     id: w.id,
                     title: w.title,
+                    class: w.class,
+                    instance: w.instance,
+                    pid: w.pid,
                     x: w.x.into(),
                     y: w.y.into(),
                     width: w.width.into(),
                     height: w.height.into(),
+                    workspace: w.workspace,
+                    mapped: w.mapped,
+                    minimized: w.minimized,
+                    maximized: w.maximized,
                 })
                 .collect();
             Ok(Json(WindowList { windows }))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Return a structured desktop scene graph of windows, focus, pointer, stacking order, and control capabilities without screenshot pixels."
+    )]
+    async fn desktop_scene(&self) -> Result<Json<DesktopSceneOut>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let ewmh = Ewmh::new(&x).map_err(to_err)?;
+            let active = ewmh.active_window().map_err(to_err)?;
+            let pointer = x.pointer().map_err(to_err)?;
+            let stacking_order = ewmh.stacking_windows().map_err(to_err)?;
+            let windows = ewmh
+                .list_windows()
+                .map_err(to_err)?
+                .into_iter()
+                .map(|w| {
+                    let stacking_index = stacking_order.iter().position(|id| *id == w.id);
+                    SceneWindowOut {
+                        id: w.id,
+                        title: w.title,
+                        class: w.class,
+                        instance: w.instance,
+                        pid: w.pid,
+                        geometry: RectOut {
+                            x: w.x.into(),
+                            y: w.y.into(),
+                            width: w.width.into(),
+                            height: w.height.into(),
+                        },
+                        workspace: w.workspace,
+                        mapped: w.mapped,
+                        minimized: w.minimized,
+                        maximized: w.maximized,
+                        active: active.is_some_and(|id| id == w.id),
+                        under_pointer: pointer.child.is_some_and(|id| id == w.id),
+                        stacking_index,
+                        transient_for: w.transient_for,
+                        group_leader: w.group_leader,
+                        capabilities: WindowCapabilitiesOut {
+                            ewmh_focus: true,
+                            ewmh_move_resize: true,
+                            ewmh_close: true,
+                            xtest_input: true,
+                            semantic_adapter: None,
+                        },
+                    }
+                })
+                .collect();
+            let (width, height) = x.dimensions();
+            Ok(Json(DesktopSceneOut {
+                screen: RectOut {
+                    x: 0,
+                    y: 0,
+                    width: width.into(),
+                    height: height.into(),
+                },
+                focus: FocusOut {
+                    active_window: active,
+                    pointer: PointerOut {
+                        x: pointer.x,
+                        y: pointer.y,
+                        window: pointer.child,
+                    },
+                },
+                stacking_order,
+                windows,
+            }))
         })
         .await
     }
@@ -885,4 +1020,66 @@ fn diff_config_from_env() -> DiffConfig {
         config.max_regions = max_regions.max(1);
     }
     config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_scene_serializes_object_first_contract() {
+        let scene = DesktopSceneOut {
+            screen: RectOut {
+                x: 0,
+                y: 0,
+                width: 1280,
+                height: 720,
+            },
+            focus: FocusOut {
+                active_window: Some(42),
+                pointer: PointerOut {
+                    x: 10,
+                    y: 20,
+                    window: Some(42),
+                },
+            },
+            stacking_order: vec![7, 42],
+            windows: vec![SceneWindowOut {
+                id: 42,
+                title: "Example".to_string(),
+                class: Some("Firefox".to_string()),
+                instance: Some("Navigator".to_string()),
+                pid: Some(1234),
+                geometry: RectOut {
+                    x: 100,
+                    y: 80,
+                    width: 800,
+                    height: 600,
+                },
+                workspace: Some(0),
+                mapped: true,
+                minimized: false,
+                maximized: false,
+                active: true,
+                under_pointer: true,
+                stacking_index: Some(1),
+                transient_for: None,
+                group_leader: Some(42),
+                capabilities: WindowCapabilitiesOut {
+                    ewmh_focus: true,
+                    ewmh_move_resize: true,
+                    ewmh_close: true,
+                    xtest_input: true,
+                    semantic_adapter: None,
+                },
+            }],
+        };
+
+        let json = serde_json::to_value(&scene).expect("scene graph serializes");
+        assert_eq!(json["screen"]["width"], 1280);
+        assert_eq!(json["focus"]["active_window"], 42);
+        assert_eq!(json["windows"][0]["class"], "Firefox");
+        assert_eq!(json["windows"][0]["geometry"]["x"], 100);
+        assert_eq!(json["windows"][0]["capabilities"]["xtest_input"], true);
+    }
 }

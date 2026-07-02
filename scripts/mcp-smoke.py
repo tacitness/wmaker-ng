@@ -22,6 +22,7 @@ REQUIRED_TOOLS = {
     "changed_regions_fast",
     "click",
     "close_window",
+    "desktop_scene",
     "drag",
     "focus",
     "get_clipboard",
@@ -272,6 +273,11 @@ def main():
         client = launch_client(args.display, args.title)
         window = find_window(mcp, args.title, args.timeout)
         window_id = window["id"]
+        scene = text_json(call_tool(mcp, "desktop_scene"))
+        if "screen" not in scene or "windows" not in scene or "focus" not in scene:
+            raise RuntimeError("desktop_scene returned malformed payload: {}".format(scene))
+        if not any(item.get("id") == window_id for item in scene.get("windows", [])):
+            raise RuntimeError("desktop_scene did not include smoke window: {}".format(scene))
 
         call_tool(mcp, "focus", {"window": window_id})
         call_tool(mcp, "key_combo", {"keys": ["ctrl", "l"]})
