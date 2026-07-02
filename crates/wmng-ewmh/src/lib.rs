@@ -51,6 +51,10 @@ struct Atoms {
     active_window: Atom,
     moveresize: Atom,
     close_window: Atom,
+    wm_state: Atom,
+    net_wm_state: Atom,
+    net_wm_state_maximized_horz: Atom,
+    net_wm_state_maximized_vert: Atom,
     net_wm_name: Atom,
     workarea: Atom,
 }
@@ -67,6 +71,10 @@ impl<'x> Ewmh<'x> {
             active_window: intern("_NET_ACTIVE_WINDOW")?,
             moveresize: intern("_NET_MOVERESIZE_WINDOW")?,
             close_window: intern("_NET_CLOSE_WINDOW")?,
+            wm_state: intern("WM_CHANGE_STATE")?,
+            net_wm_state: intern("_NET_WM_STATE")?,
+            net_wm_state_maximized_horz: intern("_NET_WM_STATE_MAXIMIZED_HORZ")?,
+            net_wm_state_maximized_vert: intern("_NET_WM_STATE_MAXIMIZED_VERT")?,
             net_wm_name: intern("_NET_WM_NAME")?,
             workarea: intern("_NET_WORKAREA")?,
         };
@@ -159,6 +167,22 @@ impl<'x> Ewmh<'x> {
         self.send_root_message(window, self.atoms.close_window, [0, SOURCE_PAGER, 0, 0, 0])
     }
 
+    /// Ask the WM to iconify/minimize a window via the ICCCM `WM_CHANGE_STATE`.
+    pub fn minimize(&self, window: Window) -> Result<()> {
+        const ICONIC_STATE: u32 = 3;
+        self.send_root_message(window, self.atoms.wm_state, [ICONIC_STATE, 0, 0, 0, 0])
+    }
+
+    /// Add the horizontal + vertical maximized EWMH state.
+    pub fn maximize(&self, window: Window) -> Result<()> {
+        self.set_maximized(window, true)
+    }
+
+    /// Remove the horizontal + vertical maximized EWMH state.
+    pub fn unmaximize(&self, window: Window) -> Result<()> {
+        self.set_maximized(window, false)
+    }
+
     /// Snap a window into a half/full slot of the work area.
     pub fn tile(&self, window: Window, slot: TileSlot) -> Result<()> {
         let (ax, ay, aw, ah) = self.work_area().unwrap_or_else(|_| {
@@ -174,6 +198,22 @@ impl<'x> Ewmh<'x> {
             TileSlot::Full => (ax, ay, aw, ah),
         };
         self.move_resize(window, x, y, w, h)
+    }
+
+    fn set_maximized(&self, window: Window, enabled: bool) -> Result<()> {
+        self.require_supported(self.atoms.net_wm_state, "_NET_WM_STATE")?;
+        let action = if enabled { 1 } else { 0 };
+        self.send_root_message(
+            window,
+            self.atoms.net_wm_state,
+            [
+                action,
+                self.atoms.net_wm_state_maximized_vert,
+                self.atoms.net_wm_state_maximized_horz,
+                SOURCE_PAGER,
+                0,
+            ],
+        )
     }
 
     // ── internals ────────────────────────────────────────────────────────────

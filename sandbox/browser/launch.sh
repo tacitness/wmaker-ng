@@ -10,6 +10,9 @@
 #   BROWSER          browser binary (default: brave-browser)
 #   START_URL        page to open on boot (default: about:blank)
 #   USER_DATA_DIR    profile dir / --user-data-dir (default: /profile)
+#   DISPOSABLE_PROFILE if "1", copy/seed into /tmp/profile and discard on exit
+#   PROFILE_SEED_TARBALL optional tar/tar.gz seed mounted from a secret store
+#   AUTH_ALLOWED_DOMAINS optional comma-separated START_URL host allowlist
 #   CLEAR_SINGLETON  if "1", remove stale Singleton{Lock,Socket,Cookie} from a
 #                    bind-mounted profile so a container Brave can claim it.
 #                    Off by default — it mutates the mounted (possibly host)
@@ -23,7 +26,36 @@ set -eu
 
 log() { echo "[wmaker-ai-browser] $*" >&2; }
 
+url_host() {
+	echo "$1" | sed -n 's,^[a-zA-Z][a-zA-Z0-9+.-]*://\([^/:?]*\).*,\1,p'
+}
+
+if [ -n "${AUTH_ALLOWED_DOMAINS:-}" ]; then
+	host="$(url_host "$START_URL")"
+	case ",$AUTH_ALLOWED_DOMAINS," in
+		*,"$host",*) ;;
+		*)
+			log "START_URL host '$host' is outside AUTH_ALLOWED_DOMAINS=$AUTH_ALLOWED_DOMAINS"
+			exit 64
+			;;
+	esac
+fi
+
+if [ "${DISPOSABLE_PROFILE:-0}" = "1" ]; then
+	USER_DATA_DIR=/tmp/wmaker-ai-browser-profile
+	export USER_DATA_DIR
+fi
+
 mkdir -p "$USER_DATA_DIR"
+
+if [ -n "${PROFILE_SEED_TARBALL:-}" ]; then
+	if [ ! -r "$PROFILE_SEED_TARBALL" ]; then
+		log "PROFILE_SEED_TARBALL is not readable: $PROFILE_SEED_TARBALL"
+		exit 66
+	fi
+	log "seeding disposable browser profile from $PROFILE_SEED_TARBALL"
+	tar -xf "$PROFILE_SEED_TARBALL" -C "$USER_DATA_DIR"
+fi
 
 if [ "${CLEAR_SINGLETON:-0}" = "1" ]; then
 	log "clearing stale Singleton locks in $USER_DATA_DIR"

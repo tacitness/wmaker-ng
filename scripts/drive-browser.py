@@ -3,8 +3,8 @@
 
 Boots `wmaker-ai-browser` (Xvfb + wmaker + Brave + ai-mcp) via `docker run -i`,
 speaks MCP over stdio, waits for the browser window, then proves the agent can
-both *observe* (screenshot + changed_regions) and *drive* (click/type) a real
-browser inside the headless desktop. Dependency-free, same shape as
+both *observe* (screenshot + changed_regions) and *drive* (key_combo/type/click)
+a real browser inside the headless desktop. Dependency-free, same shape as
 scripts/mcp-smoke.py.
 """
 
@@ -111,14 +111,35 @@ def save_png(res, path):
     raise RuntimeError("no image content in screenshot result")
 
 
+def find_browser_window(windows):
+    needles = ("Brave", "Chromium", "Chrome", "Example Domain", "about:blank")
+    for window in windows:
+        title = window.get("title", "")
+        if any(needle in title for needle in needles):
+            return window
+    if windows:
+        return windows[0]
+    raise RuntimeError("no browser window found")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", default="wmaker-ai-browser")
     ap.add_argument("--url", default="https://example.com")
+    ap.add_argument("--navigate-url", default=None,
+                    help="URL to navigate to through the MCP control surface; defaults to --url")
+    ap.add_argument("--observation-lane", choices=("png", "fast"), default="png",
+                    help="model-facing default is png; fast is opt-in for local latency tests")
     ap.add_argument("--geometry", default="1280x800x24")
     ap.add_argument("--out-dir", default="/tmp/wmaker-ai-browser")
     ap.add_argument("--profile", default=None,
                     help="host profile dir to bind-mount at /profile (live Brave must be closed)")
+    ap.add_argument("--disposable-profile", action="store_true",
+                    help="run browser with DISPOSABLE_PROFILE=1")
+    ap.add_argument("--profile-seed", default=None,
+                    help="read-only profile seed tarball mounted into the container")
+    ap.add_argument("--auth-allowed-domains", default=None,
+                    help="comma-separated START_URL allowlist for seeded/auth runs")
     ap.add_argument("--clear-singleton", action="store_true")
     ap.add_argument("--timeout", type=float, default=30.0)
     ap.add_argument("--render-wait", type=float, default=10.0)
@@ -130,6 +151,16 @@ def main():
             "-e", "START_URL=" + args.url]
     if args.profile:
         argv += ["-v", os.path.abspath(args.profile) + ":/profile"]
+    if args.disposable_profile:
+        argv += ["-e", "DISPOSABLE_PROFILE=1"]
+    if args.profile_seed:
+        seed = os.path.abspath(args.profile_seed)
+        argv += [
+            "-v", seed + ":/run/secrets/browser-profile.tar.gz:ro",
+            "-e", "PROFILE_SEED_TARBALL=/run/secrets/browser-profile.tar.gz",
+        ]
+    if args.auth_allowed_domains:
+        argv += ["-e", "AUTH_ALLOWED_DOMAINS=" + args.auth_allowed_domains]
     if args.clear_singleton:
         argv += ["-e", "CLEAR_SINGLETON=1"]
     argv.append(args.image)
@@ -151,22 +182,34 @@ def main():
 
         windows = text_json(call(mcp, "list_windows")).get("windows", [])
         titles = [w.get("title", "") for w in windows]
+        browser = find_browser_window(windows)
+        call(mcp, "focus", {"window": browser["id"]})
+
+        nav_url = args.navigate_url or args.url
+        call(mcp, "key_combo", {"keys": ["ctrl", "l"]})
+        call(mcp, "type", {"text": nav_url})
+        call(mcp, "key", {"key": "Return"})
+        call(mcp, "wait_for_idle", {"quiet_ms": 500, "timeout_ms": int(args.render_wait * 1000)})
+        time.sleep(1.0)
 
         # Keyframe baseline, then a full screenshot of the rendered page.
         keyframe = text_json(call(mcp, "changed_regions"))
         before = save_png(call(mcp, "screenshot"), os.path.join(args.out_dir, "01-page.png"))
 
         # Drive input: click into the page and type, to dirty the screen.
-        call(mcp, "move_mouse", {"x": 640, "y": 400})
-        call(mcp, "click", {})
+        call(mcp, "click", {"x": 640, "y": 400})
         call(mcp, "type", {"text": "wmaker-ng drives brave"})
         time.sleep(1.0)
-        delta = text_json(call(mcp, "changed_regions"))
+        delta_tool = "changed_regions_fast" if args.observation_lane == "fast" else "changed_regions"
+        delta = text_json(call(mcp, delta_tool))
         after = save_png(call(mcp, "screenshot"), os.path.join(args.out_dir, "02-after-input.png"))
 
         report = {
             "protocol": proto,
             "windows": titles,
+            "browser_window": browser.get("title", ""),
+            "navigated_url": nav_url,
+            "observation_lane": args.observation_lane,
             "keyframe_kind": keyframe.get("kind"),
             "keyframe_regions": len(keyframe.get("regions", [])),
             "delta_kind": delta.get("kind"),

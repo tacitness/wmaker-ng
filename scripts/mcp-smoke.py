@@ -21,14 +21,24 @@ REQUIRED_TOOLS = {
     "changed_regions",
     "changed_regions_fast",
     "click",
+    "close_window",
+    "drag",
     "focus",
+    "get_clipboard",
     "key",
+    "key_combo",
     "list_windows",
+    "maximize",
+    "minimize",
     "move_mouse",
     "move_resize",
+    "pointer",
+    "scroll",
     "screenshot",
+    "set_clipboard",
     "tile",
     "type",
+    "wait_for_idle",
 }
 
 
@@ -226,6 +236,8 @@ def main():
     parser = argparse.ArgumentParser(description="Smoke-test ai-mcp against a live X display.")
     parser.add_argument("--display", default=os.environ.get("DISPLAY", ":9"))
     parser.add_argument("--ai-mcp", default="./target/debug/ai-mcp")
+    parser.add_argument("--fast-delta", action="store_true",
+                        help="also exercise changed_regions_fast; PNG dirty deltas stay the default model-facing lane")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--title", default="wmng-mcp-smoke")
     args = parser.parse_args()
@@ -262,15 +274,30 @@ def main():
         window_id = window["id"]
 
         call_tool(mcp, "focus", {"window": window_id})
+        call_tool(mcp, "key_combo", {"keys": ["ctrl", "l"]})
+        call_tool(mcp, "key", {"key": "Escape"})
+        call_tool(mcp, "scroll", {"dy": 1})
+        call_tool(mcp, "click", {"x": 120, "y": 120, "button": 1, "count": 1})
+        call_tool(mcp, "drag", {"x1": 120, "y1": 120, "x2": 180, "y2": 150, "button": 1})
+        pointer = text_json(call_tool(mcp, "pointer"))
+        if "x" not in pointer or "y" not in pointer:
+            raise RuntimeError("pointer returned malformed payload: {}".format(pointer))
+        call_tool(mcp, "set_clipboard", {"text": "wmng clipboard smoke"})
+        clipboard = text_json(call_tool(mcp, "get_clipboard"))
+        if clipboard.get("text") != "wmng clipboard smoke":
+            raise RuntimeError("clipboard round-trip failed: {}".format(clipboard))
+        idle = text_json(call_tool(mcp, "wait_for_idle", {"quiet_ms": 100, "timeout_ms": 1000}))
+        if "idle" not in idle:
+            raise RuntimeError("wait_for_idle returned malformed payload: {}".format(idle))
         first_delta = next_delta(mcp, screen_area, window_id)
 
         screenshot_bytes = image_size(call_tool(mcp, "screenshot"))
         if screenshot_bytes <= 0:
             raise RuntimeError("screenshot returned an empty PNG payload")
-        fast_delta = next_fast_delta(mcp, screen_area, window_id)
+        fast_delta = next_fast_delta(mcp, screen_area, window_id) if args.fast_delta else None
 
         print(
-            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} screenshot_b64_bytes={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
+            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
                 args.display,
                 init.get("protocolVersion", "<unknown>"),
                 window_id,
@@ -279,12 +306,13 @@ def main():
                 sum(len(region.get("png_base64", "")) for region in first_delta.get("regions", [])),
                 first_delta.get("_call_ms"),
                 screenshot_bytes,
-                len(fast_delta["regions"]),
-                fast_delta.get("encoded_bytes"),
-                fast_delta.get("_call_ms"),
-                fast_delta.get("timings", {}).get("total_ms"),
-                fast_delta.get("timings", {}).get("capture_ms"),
-                fast_delta.get("timings", {}).get("encode_ms"),
+                bool(fast_delta),
+                len(fast_delta["regions"]) if fast_delta else 0,
+                fast_delta.get("encoded_bytes") if fast_delta else 0,
+                fast_delta.get("_call_ms") if fast_delta else 0,
+                fast_delta.get("timings", {}).get("total_ms") if fast_delta else 0,
+                fast_delta.get("timings", {}).get("capture_ms") if fast_delta else 0,
+                fast_delta.get("timings", {}).get("encode_ms") if fast_delta else 0,
             )
         )
         return 0

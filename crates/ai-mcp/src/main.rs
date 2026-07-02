@@ -27,6 +27,7 @@ struct WmCtl {
     capture: Arc<Mutex<SharedCapture>>,
     diff: Arc<Mutex<DiffEncoder>>,
     damage: Arc<Mutex<DamageFeed>>,
+    clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
 }
 
 // ── Tool parameter / output schemas (auto-generate the MCP contract) ─────────
@@ -39,12 +40,43 @@ struct MoveMouse {
 
 #[derive(Deserialize, JsonSchema)]
 struct Click {
+    /// Optional x coordinate; when present with y, click happens at that point.
+    x: Option<i16>,
+    /// Optional y coordinate; when present with x, click happens at that point.
+    y: Option<i16>,
     /// Pointer button: 1=left, 2=middle, 3=right.
     #[serde(default = "default_button")]
     button: u8,
+    /// Number of clicks to synthesize.
+    #[serde(default = "default_click_count")]
+    count: u8,
 }
 fn default_button() -> u8 {
     1
+}
+fn default_click_count() -> u8 {
+    1
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Scroll {
+    /// Horizontal wheel steps. Positive scrolls right, negative left.
+    #[serde(default)]
+    dx: i16,
+    /// Vertical wheel steps. Positive scrolls down, negative up.
+    #[serde(default)]
+    dy: i16,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct Drag {
+    x1: i16,
+    y1: i16,
+    x2: i16,
+    y2: i16,
+    /// Pointer button: 1=left, 2=middle, 3=right.
+    #[serde(default = "default_button")]
+    button: u8,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -54,12 +86,32 @@ struct TypeText {
 
 #[derive(Deserialize, JsonSchema)]
 struct Key {
-    /// X keysym (e.g. 0xff0d = Return).
-    keysym: u32,
+    /// X keysym (e.g. 0xff0d = Return). Either `keysym` or `key` is required.
+    keysym: Option<u32>,
+    /// Friendly key name (Return, Tab, Escape, Page_Down) or a single character.
+    key: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct KeyCombo {
+    /// Ordered key names, e.g. ["ctrl", "l"] or ["ctrl", "shift", "r"].
+    keys: Option<Vec<String>>,
+    /// Final key when using the explicit form.
+    key: Option<String>,
+    /// Final X keysym when using the explicit form.
+    keysym: Option<u32>,
+    /// Modifiers for the explicit form: ctrl, alt, shift, super.
+    #[serde(default)]
+    modifiers: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct Focus {
+    window: u32,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct WindowRef {
     window: u32,
 }
 
@@ -76,6 +128,11 @@ struct MoveResize {
 struct Tile {
     window: u32,
     slot: Slot,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SetClipboard {
+    text: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -121,6 +178,18 @@ struct WindowOut {
 #[derive(Serialize, JsonSchema)]
 struct WindowList {
     windows: Vec<WindowOut>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct PointerOut {
+    x: i16,
+    y: i16,
+    window: Option<u32>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ClipboardOut {
+    text: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -178,6 +247,21 @@ struct ScreenUpdateFastOut {
     regions: Vec<RawRegionOut>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct WaitForIdle {
+    /// Required quiet period before returning idle.
+    quiet_ms: u64,
+    /// Maximum time to wait.
+    timeout_ms: u64,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct WaitForIdleOut {
+    idle: bool,
+    elapsed_ms: u128,
+    damage_events: usize,
+}
+
 #[tool_router(server_handler)]
 impl WmCtl {
     // ── Input synthesis (XTEST) ──────────────────────────────────────────────
@@ -190,10 +274,40 @@ impl WmCtl {
         run(move || x.move_pointer(p.x, p.y).map(|_| ok()).map_err(to_err)).await
     }
 
-    #[tool(description = "Click a pointer button at the current position.")]
+    #[tool(description = "Click a pointer button, optionally at absolute root coordinates.")]
     async fn click(&self, Parameters(p): Parameters<Click>) -> Result<Json<Status>, ErrorData> {
         let x = self.x.clone();
-        run(move || x.click(p.button).map(|_| ok()).map_err(to_err)).await
+        run(move || {
+            match (p.x, p.y) {
+                (Some(px), Some(py)) => x.click_at(px, py, p.button, p.count),
+                _ => {
+                    for _ in 0..p.count.max(1) {
+                        x.click(p.button).map_err(to_err)?;
+                    }
+                    Ok(())
+                }
+            }
+            .map(|_| ok())
+            .map_err(to_err)
+        })
+        .await
+    }
+
+    #[tool(description = "Scroll with XTEST wheel buttons. Positive dy scrolls down.")]
+    async fn scroll(&self, Parameters(p): Parameters<Scroll>) -> Result<Json<Status>, ErrorData> {
+        let x = self.x.clone();
+        run(move || x.scroll(p.dx, p.dy).map(|_| ok()).map_err(to_err)).await
+    }
+
+    #[tool(description = "Drag from one absolute root coordinate to another.")]
+    async fn drag(&self, Parameters(p): Parameters<Drag>) -> Result<Json<Status>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            x.drag(p.x1, p.y1, p.x2, p.y2, p.button)
+                .map(|_| ok())
+                .map_err(to_err)
+        })
+        .await
     }
 
     #[tool(name = "type", description = "Type a string of text.")]
@@ -205,10 +319,27 @@ impl WmCtl {
         run(move || x.type_text(&p.text).map(|_| ok()).map_err(to_err)).await
     }
 
-    #[tool(description = "Tap a key by X keysym.")]
+    #[tool(description = "Tap a key by X keysym or friendly key name.")]
     async fn key(&self, Parameters(p): Parameters<Key>) -> Result<Json<Status>, ErrorData> {
         let x = self.x.clone();
-        run(move || x.key(p.keysym).map(|_| ok()).map_err(to_err)).await
+        run(move || {
+            let keysym = resolve_key(p.keysym, p.key.as_deref())?;
+            x.key(keysym).map(|_| ok()).map_err(to_err)
+        })
+        .await
+    }
+
+    #[tool(description = "Tap a key chord such as Ctrl+L, Ctrl+T, Alt+Tab, or Ctrl+Shift+R.")]
+    async fn key_combo(
+        &self,
+        Parameters(p): Parameters<KeyCombo>,
+    ) -> Result<Json<Status>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let (modifiers, key) = resolve_combo(p)?;
+            x.key_combo(&modifiers, key).map(|_| ok()).map_err(to_err)
+        })
+        .await
     }
 
     // ── Window control (EWMH) ────────────────────────────────────────────────
@@ -268,6 +399,98 @@ impl WmCtl {
             ewmh.tile(p.window, p.slot.into())
                 .map(|_| ok())
                 .map_err(to_err)
+        })
+        .await
+    }
+
+    #[tool(description = "Close a window via _NET_CLOSE_WINDOW.")]
+    async fn close_window(
+        &self,
+        Parameters(p): Parameters<WindowRef>,
+    ) -> Result<Json<Status>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let ewmh = Ewmh::new(&x).map_err(to_err)?;
+            ewmh.close(p.window).map(|_| ok()).map_err(to_err)
+        })
+        .await
+    }
+
+    #[tool(description = "Minimize/iconify a window.")]
+    async fn minimize(
+        &self,
+        Parameters(p): Parameters<WindowRef>,
+    ) -> Result<Json<Status>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let ewmh = Ewmh::new(&x).map_err(to_err)?;
+            ewmh.minimize(p.window).map(|_| ok()).map_err(to_err)
+        })
+        .await
+    }
+
+    #[tool(description = "Maximize a window horizontally and vertically.")]
+    async fn maximize(
+        &self,
+        Parameters(p): Parameters<WindowRef>,
+    ) -> Result<Json<Status>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let ewmh = Ewmh::new(&x).map_err(to_err)?;
+            ewmh.maximize(p.window).map(|_| ok()).map_err(to_err)
+        })
+        .await
+    }
+
+    #[tool(description = "Return pointer coordinates and the window under the cursor.")]
+    async fn pointer(&self) -> Result<Json<PointerOut>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let p = x.pointer().map_err(to_err)?;
+            Ok(Json(PointerOut {
+                x: p.x,
+                y: p.y,
+                window: p.child,
+            }))
+        })
+        .await
+    }
+
+    #[tool(description = "Set the desktop clipboard text.")]
+    async fn set_clipboard(
+        &self,
+        Parameters(p): Parameters<SetClipboard>,
+    ) -> Result<Json<Status>, ErrorData> {
+        let clipboard = self.clipboard.clone();
+        run(move || {
+            let mut guard = clipboard.lock().map_err(lock_err)?;
+            if guard.is_none() {
+                *guard = Some(arboard::Clipboard::new().map_err(to_err)?);
+            }
+            guard
+                .as_mut()
+                .expect("clipboard initialized")
+                .set_text(p.text)
+                .map_err(to_err)?;
+            Ok(ok())
+        })
+        .await
+    }
+
+    #[tool(description = "Get the desktop clipboard text.")]
+    async fn get_clipboard(&self) -> Result<Json<ClipboardOut>, ErrorData> {
+        let clipboard = self.clipboard.clone();
+        run(move || {
+            let mut guard = clipboard.lock().map_err(lock_err)?;
+            if guard.is_none() {
+                *guard = Some(arboard::Clipboard::new().map_err(to_err)?);
+            }
+            let text = guard
+                .as_mut()
+                .expect("clipboard initialized")
+                .get_text()
+                .map_err(to_err)?;
+            Ok(Json(ClipboardOut { text }))
         })
         .await
     }
@@ -368,6 +591,43 @@ impl WmCtl {
         })
         .await
     }
+
+    #[tool(description = "Wait until XDamage has been quiet for quiet_ms, or timeout_ms expires.")]
+    async fn wait_for_idle(
+        &self,
+        Parameters(p): Parameters<WaitForIdle>,
+    ) -> Result<Json<WaitForIdleOut>, ErrorData> {
+        let damage = self.damage.clone();
+        run(move || {
+            let quiet = Duration::from_millis(p.quiet_ms.max(1));
+            let timeout = Duration::from_millis(p.timeout_ms.max(p.quiet_ms).max(1));
+            let start = Instant::now();
+            let mut quiet_since = Instant::now();
+            let mut events = 0usize;
+            while start.elapsed() < timeout {
+                let rects = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
+                if rects.is_empty() {
+                    if quiet_since.elapsed() >= quiet {
+                        return Ok(Json(WaitForIdleOut {
+                            idle: true,
+                            elapsed_ms: start.elapsed().as_millis(),
+                            damage_events: events,
+                        }));
+                    }
+                } else {
+                    events += rects.len();
+                    quiet_since = Instant::now();
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Ok(Json(WaitForIdleOut {
+                idle: false,
+                elapsed_ms: start.elapsed().as_millis(),
+                damage_events: events,
+            }))
+        })
+        .await
+    }
 }
 
 /// Run blocking X work off the async reactor.
@@ -385,6 +645,100 @@ fn to_err<E: std::fmt::Display>(e: E) -> ErrorData {
 
 fn lock_err<T>(e: PoisonError<T>) -> ErrorData {
     ErrorData::internal_error(e.to_string(), None)
+}
+
+fn resolve_combo(p: KeyCombo) -> Result<(Vec<u32>, u32), ErrorData> {
+    if let Some(keys) = p.keys {
+        let mut parts = keys.iter().map(String::as_str).collect::<Vec<_>>();
+        let Some(key) = parts.pop() else {
+            return Err(ErrorData::invalid_params(
+                "key_combo keys cannot be empty",
+                None,
+            ));
+        };
+        let modifiers = parts
+            .iter()
+            .map(|name| modifier_keysym(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok((modifiers, parse_key_name(key)?));
+    }
+
+    let modifiers = p
+        .modifiers
+        .iter()
+        .map(|name| modifier_keysym(name))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((modifiers, resolve_key(p.keysym, p.key.as_deref())?))
+}
+
+fn resolve_key(keysym: Option<u32>, key: Option<&str>) -> Result<u32, ErrorData> {
+    match (keysym, key) {
+        (Some(keysym), _) => Ok(keysym),
+        (None, Some(key)) => parse_key_name(key),
+        (None, None) => Err(ErrorData::invalid_params(
+            "either keysym or key is required",
+            None,
+        )),
+    }
+}
+
+fn modifier_keysym(name: &str) -> Result<u32, ErrorData> {
+    match normalize_key_name(name).as_str() {
+        "ctrl" | "control" | "control_l" => Ok(0xffe3),
+        "alt" | "alt_l" => Ok(0xffe9),
+        "shift" | "shift_l" => Ok(0xffe1),
+        "super" | "super_l" | "meta" | "win" => Ok(0xffeb),
+        other => Err(ErrorData::invalid_params(
+            format!("unknown modifier: {other}"),
+            None,
+        )),
+    }
+}
+
+fn parse_key_name(name: &str) -> Result<u32, ErrorData> {
+    let trimmed = name.trim();
+    let mut chars = trimmed.chars();
+    if let (Some(ch), None) = (chars.next(), chars.next()) {
+        return Ok(ch as u32);
+    }
+
+    match normalize_key_name(trimmed).as_str() {
+        "return" | "enter" => Ok(0xff0d),
+        "tab" => Ok(0xff09),
+        "escape" | "esc" => Ok(0xff1b),
+        "backspace" => Ok(0xff08),
+        "delete" | "del" => Ok(0xffff),
+        "insert" | "ins" => Ok(0xff63),
+        "space" => Ok(0x20),
+        "page_down" | "pagedown" => Ok(0xff56),
+        "page_up" | "pageup" => Ok(0xff55),
+        "home" => Ok(0xff50),
+        "end" => Ok(0xff57),
+        "left" => Ok(0xff51),
+        "up" => Ok(0xff52),
+        "right" => Ok(0xff53),
+        "down" => Ok(0xff54),
+        "f1" => Ok(0xffbe),
+        "f2" => Ok(0xffbf),
+        "f3" => Ok(0xffc0),
+        "f4" => Ok(0xffc1),
+        "f5" => Ok(0xffc2),
+        "f6" => Ok(0xffc3),
+        "f7" => Ok(0xffc4),
+        "f8" => Ok(0xffc5),
+        "f9" => Ok(0xffc6),
+        "f10" => Ok(0xffc7),
+        "f11" => Ok(0xffc8),
+        "f12" => Ok(0xffc9),
+        other => Err(ErrorData::invalid_params(
+            format!("unknown key name: {other}"),
+            None,
+        )),
+    }
+}
+
+fn normalize_key_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase().replace('-', "_")
 }
 
 fn to_screen_update_out(update: ScreenUpdate) -> ScreenUpdateOut {
@@ -480,6 +834,7 @@ async fn main() -> anyhow::Result<()> {
         capture,
         diff: Arc::new(Mutex::new(DiffEncoder::new(diff_config_from_env()))),
         damage,
+        clipboard: Arc::new(Mutex::new(None)),
     }
     .serve(stdio())
     .await?;
