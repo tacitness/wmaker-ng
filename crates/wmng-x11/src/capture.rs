@@ -2,6 +2,7 @@
 //! plain `GetImage` fallback when the extension is unavailable.
 
 use std::os::raw::c_void;
+use std::sync::Arc;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::shm::ConnectionExt as _;
@@ -39,11 +40,25 @@ pub struct Capture<'x> {
     buf: Vec<u8>,
 }
 
+/// A reusable capturer that owns an [`Arc<X>`], suitable for daemon state.
+pub struct SharedCapture {
+    x: Arc<X>,
+    width: u16,
+    height: u16,
+    depth: u8,
+    bpp: u8,
+    shm: Option<ShmState>,
+    buf: Vec<u8>,
+}
+
 struct ShmState {
     addr: *mut c_void,
     seg: u32,
     size: usize,
 }
+
+unsafe impl Send for ShmState {}
+unsafe impl Send for SharedCapture {}
 
 impl<'x> Capture<'x> {
     pub(crate) fn new(x: &'x X) -> Result<Self> {
@@ -146,6 +161,103 @@ impl Drop for Capture<'_> {
             let _ = self.x.conn().flush();
             // SAFETY: addr came from shmat; detach our mapping (IPC_RMID was
             // already set, so the segment is freed here).
+            unsafe { libc::shmdt(shm.addr) };
+        }
+    }
+}
+
+impl SharedCapture {
+    pub(crate) fn new(x: Arc<X>) -> Result<Self> {
+        let (width, height) = x.dimensions();
+        let mut cap = SharedCapture {
+            x,
+            width,
+            height,
+            depth: 0,
+            bpp: 0,
+            shm: None,
+            buf: Vec::new(),
+        };
+        cap.depth = cap.x.root_depth();
+        cap.bpp = cap.x.bytes_per_pixel();
+        if cap.x.shm_available() {
+            cap.shm = cap.init_shm().ok();
+        }
+        Ok(cap)
+    }
+
+    fn init_shm(&self) -> Result<ShmState> {
+        let size = self.width as usize * self.height as usize * self.bpp as usize;
+        let id = unsafe { libc::shmget(libc::IPC_PRIVATE, size, libc::IPC_CREAT | 0o600) };
+        if id < 0 {
+            return Err(Error::Shm("shmget"));
+        }
+        let addr = unsafe { libc::shmat(id, std::ptr::null(), 0) };
+        if addr as isize == -1 {
+            unsafe { libc::shmctl(id, libc::IPC_RMID, std::ptr::null_mut()) };
+            return Err(Error::Shm("shmat"));
+        }
+        let seg = self.x.conn().generate_id()?;
+        self.x.conn().shm_attach(seg, id as u32, false)?;
+        self.x.conn().flush()?;
+        unsafe { libc::shmctl(id, libc::IPC_RMID, std::ptr::null_mut()) };
+        Ok(ShmState { addr, seg, size })
+    }
+
+    /// Capture the current root-window contents, reusing one SHM segment.
+    pub fn frame(&mut self) -> Result<Frame<'_>> {
+        let conn = self.x.conn();
+        let root = self.x.root();
+        if let Some(shm) = &self.shm {
+            conn.shm_get_image(
+                root,
+                0,
+                0,
+                self.width,
+                self.height,
+                !0,
+                ImageFormat::Z_PIXMAP.into(),
+                shm.seg,
+                0,
+            )?
+            .reply()?;
+            let data = unsafe { std::slice::from_raw_parts(shm.addr as *const u8, shm.size) };
+            Ok(Frame {
+                width: self.width,
+                height: self.height,
+                depth: self.depth,
+                bytes_per_pixel: self.bpp,
+                data,
+            })
+        } else {
+            let img = conn
+                .get_image(
+                    ImageFormat::Z_PIXMAP,
+                    root,
+                    0,
+                    0,
+                    self.width,
+                    self.height,
+                    !0,
+                )?
+                .reply()?;
+            self.buf = img.data;
+            Ok(Frame {
+                width: self.width,
+                height: self.height,
+                depth: self.depth,
+                bytes_per_pixel: self.bpp,
+                data: &self.buf,
+            })
+        }
+    }
+}
+
+impl Drop for SharedCapture {
+    fn drop(&mut self) {
+        if let Some(shm) = &self.shm {
+            let _ = self.x.conn().shm_detach(shm.seg);
+            let _ = self.x.conn().flush();
             unsafe { libc::shmdt(shm.addr) };
         }
     }

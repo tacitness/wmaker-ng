@@ -75,6 +75,18 @@ impl DiffEncoder {
         })
     }
 
+    /// Mark the current client view as baselined without encoding a keyframe.
+    ///
+    /// MCP clients that already consumed a full screenshot can call this before
+    /// requesting raw deltas, avoiding an immediate full-frame raw payload.
+    pub fn note_keyframe(&mut self) {
+        self.last_keyframe = Some(Instant::now());
+    }
+
+    pub fn has_keyframe(&self) -> bool {
+        self.last_keyframe.is_some()
+    }
+
     /// Encode the changed regions, falling back to a keyframe when the delta is
     /// too old or too large to stay cheap.
     pub fn changed_regions(
@@ -116,6 +128,76 @@ impl DiffEncoder {
             regions: rects
                 .into_iter()
                 .map(|rect| encode_region(frame, rect))
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+
+    /// Return raw X11 pixel crops for the changed regions. This avoids PNG
+    /// deflate and RGBA conversion, so it is intended for low-latency local
+    /// consumers that can handle native `ZPixmap` bytes.
+    pub fn changed_regions_raw(
+        &mut self,
+        frame: &Frame<'_>,
+        dirty: &[XRectangle],
+    ) -> Result<RawScreenUpdate, Error> {
+        let rects = coalesce_rects(
+            normalize_rects(frame.width, frame.height, dirty),
+            self.config.max_regions,
+        );
+        let dirty_area = rects
+            .iter()
+            .fold(0u32, |total, rect| total.saturating_add(rect.area()));
+
+        if self.last_keyframe.is_none() {
+            return Ok(RawScreenUpdate {
+                kind: UpdateKind::Keyframe,
+                width: frame.width,
+                height: frame.height,
+                bytes_per_pixel: frame.bytes_per_pixel,
+                dirty_area: frame.width as u32 * frame.height as u32,
+                rebaseline_reason: Some(RebaselineReason::Initial),
+                needs_keyframe: true,
+                regions: Vec::new(),
+            });
+        }
+
+        if rects.is_empty() {
+            return Ok(RawScreenUpdate {
+                kind: UpdateKind::Delta,
+                width: frame.width,
+                height: frame.height,
+                bytes_per_pixel: frame.bytes_per_pixel,
+                dirty_area: 0,
+                rebaseline_reason: None,
+                needs_keyframe: false,
+                regions: Vec::new(),
+            });
+        }
+
+        if let Some(reason) = self.rebaseline_reason(frame, dirty_area) {
+            return Ok(RawScreenUpdate {
+                kind: UpdateKind::Keyframe,
+                width: frame.width,
+                height: frame.height,
+                bytes_per_pixel: frame.bytes_per_pixel,
+                dirty_area: frame.width as u32 * frame.height as u32,
+                rebaseline_reason: Some(reason),
+                needs_keyframe: true,
+                regions: Vec::new(),
+            });
+        }
+
+        Ok(RawScreenUpdate {
+            kind: UpdateKind::Delta,
+            width: frame.width,
+            height: frame.height,
+            bytes_per_pixel: frame.bytes_per_pixel,
+            dirty_area,
+            rebaseline_reason: None,
+            needs_keyframe: false,
+            regions: rects
+                .into_iter()
+                .map(|rect| encode_region_raw(frame, rect))
                 .collect::<Result<Vec<_>, _>>()?,
         })
     }
@@ -180,6 +262,26 @@ pub struct ScreenUpdate {
     pub dirty_area: u32,
     pub rebaseline_reason: Option<RebaselineReason>,
     pub regions: Vec<EncodedRegion>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RawEncodedRegion {
+    pub rect: Rect,
+    pub stride: u32,
+    #[serde(skip_serializing)]
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RawScreenUpdate {
+    pub kind: UpdateKind,
+    pub width: u16,
+    pub height: u16,
+    pub bytes_per_pixel: u8,
+    pub dirty_area: u32,
+    pub rebaseline_reason: Option<RebaselineReason>,
+    pub needs_keyframe: bool,
+    pub regions: Vec<RawEncodedRegion>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -251,6 +353,34 @@ fn encode_region(frame: &Frame<'_>, rect: Rect) -> Result<EncodedRegion, Error> 
             frame.bytes_per_pixel,
             rect,
         )?,
+    })
+}
+
+fn encode_region_raw(frame: &Frame<'_>, rect: Rect) -> Result<RawEncodedRegion, Error> {
+    let bpp = frame.bytes_per_pixel as usize;
+    if bpp < 3 {
+        return Err(Error::UnsupportedBpp(frame.bytes_per_pixel));
+    }
+
+    let frame_width = frame.width as usize;
+    let rect_x = rect.x as usize;
+    let rect_y = rect.y as usize;
+    let rect_w = rect.width as usize;
+    let rect_h = rect.height as usize;
+    let frame_stride = frame_width * bpp;
+    let region_stride = rect_w * bpp;
+    let mut bytes = Vec::with_capacity(region_stride * rect_h);
+
+    for y in rect_y..rect_y + rect_h {
+        let start = y * frame_stride + rect_x * bpp;
+        let end = start + region_stride;
+        bytes.extend_from_slice(&frame.bytes()[start..end]);
+    }
+
+    Ok(RawEncodedRegion {
+        rect,
+        stride: region_stride as u32,
+        bytes,
     })
 }
 
