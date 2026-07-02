@@ -646,6 +646,7 @@ name = "ng-automount"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "tokio",
  "tracing",
  "tracing-subscriber",

@@ -68,6 +68,7 @@ anyhow = "1.0.103"
 thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+futures-util = "0.3.31"
 
 # ── Release profile ─────────────────────────────────────────────────────────
 # Lightweight is the product (PLAN §1): optimize for size + no-panic-unwind in
