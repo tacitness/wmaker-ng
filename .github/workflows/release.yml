@@ -43,7 +43,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-      - uses: taiki-e/install-action@81ee1d48d9194cdcab880cbdc7d36e87d39874cb # v2.62.45
+      - uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
         with:
           tool: cargo-zigbuild
       - name: Derive version from tag
@@ -205,7 +205,7 @@ jobs:
           [ -n "${ABUILD_KEY:-}" ] && keyenv="-e ABUILD_KEY=/w/dist/.keys/wmaker-ng.rsa"
           docker run --rm --network host -v "$PWD:/w" -w /w $keyenv \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-            alpine:3.22 sh -c \
+            alpine:3.24 sh -c \
             'apk add --no-cache bash abuild >/dev/null \
              && bash scripts/repo-apk.sh dist/repo/apk dist/pkg \
              && chown -R "$HOST_UID:$HOST_GID" dist/repo/apk'

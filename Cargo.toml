@@ -44,7 +44,7 @@ x11rb = { version = "0.13.2", default-features = false }
 zbus = { version = "5.16.0", default-features = false, features = ["tokio"] }
 
 # Model Context Protocol server runtime — the heart of wmaker-ai (PLAN §5).
-rmcp = { version = "1.8.0", default-features = false }
+rmcp = { version = "2.1.0", default-features = false }
 
 # Async runtime for the event-driven companions.
 tokio = { version = "1.52.3", default-features = false }
@@ -57,7 +57,7 @@ schemars = "1.2.1"
 # Screenshot encoding for the MCP screenshot tool.
 png = "0.18.1"
 base64 = "0.22.1"
-lz4_flex = "0.11.5"
+lz4_flex = "0.13.1"
 arboard = { version = "3.6.1", default-features = false }
 
 # MIT-SHM shared-memory segment management (wmng-x11 capture path).
@@ -68,7 +68,7 @@ anyhow = "1.0.103"
 thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
-futures-util = "0.3.31"
+futures-util = "0.3.32"
 
 # ── Release profile ─────────────────────────────────────────────────────────
 # Lightweight is the product (PLAN §1): optimize for size + no-panic-unwind in

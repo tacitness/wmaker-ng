@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use ai_proto::{DiffConfig, DiffEncoder, ScreenUpdate};
 use base64::Engine as _;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::{CallToolResult, Content, ErrorData};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use rmcp::transport::stdio;
 use rmcp::{ServiceExt, tool, tool_router};
 use schemars::JsonSchema;
@@ -968,7 +968,7 @@ impl WmCtl {
             let png = ai_proto::encode_full_png(&frame).map_err(to_err)?;
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
             diff.lock().map_err(lock_err)?.note_keyframe();
-            Ok(CallToolResult::success(vec![Content::image(
+            Ok(CallToolResult::success(vec![ContentBlock::image(
                 b64,
                 "image/png",
             )]))
