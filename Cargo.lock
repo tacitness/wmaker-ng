@@ -34,6 +34,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wmng-dbus",
  "wmng-ewmh",
  "wmng-x11",
 ]

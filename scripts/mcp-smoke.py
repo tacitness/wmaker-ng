@@ -18,6 +18,7 @@ import time
 
 
 REQUIRED_TOOLS = {
+    "accessibility_tree",
     "changed_regions",
     "changed_regions_fast",
     "click",
@@ -288,6 +289,12 @@ def main():
         )
         if not observed_window:
             raise RuntimeError("observe did not include smoke window: {}".format(observation))
+        accessibility = text_json(call_tool(mcp, "accessibility_tree", {
+            "max_depth": 1,
+            "max_children_per_node": 8,
+        }))
+        if "available" not in accessibility or "nodes" not in accessibility:
+            raise RuntimeError("accessibility_tree returned malformed payload: {}".format(accessibility))
 
         call_tool(mcp, "focus", {"window": window_id})
         call_tool(mcp, "key_combo", {"keys": ["ctrl", "l"]})
@@ -313,7 +320,7 @@ def main():
         fast_delta = next_fast_delta(mcp, screen_area, window_id) if args.fast_delta else None
 
         print(
-            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
+            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} accessibility_nodes={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
                 args.display,
                 init.get("protocolVersion", "<unknown>"),
                 window_id,
@@ -321,6 +328,7 @@ def main():
                 len(first_delta["regions"]),
                 sum(len(region.get("png_base64", "")) for region in first_delta.get("regions", [])),
                 first_delta.get("_call_ms"),
+                accessibility.get("node_count"),
                 screenshot_bytes,
                 bool(fast_delta),
                 len(fast_delta["regions"]) if fast_delta else 0,

@@ -136,6 +136,14 @@ struct SetClipboard {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct AccessibilityTree {
+    /// Maximum depth from the AT-SPI root. Defaults to 2 and is capped at 4.
+    max_depth: Option<u8>,
+    /// Maximum children sampled from each node. Defaults to 16 and is capped at 64.
+    max_children_per_node: Option<u8>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum Slot {
     Left,
@@ -275,6 +283,39 @@ struct PixelFallbacksOut {
     dirty_png_delta_tool: String,
     fast_delta_tool: String,
     local_crop_reference: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct AccessibilityTreeOut {
+    available: bool,
+    max_depth: u8,
+    max_children_per_node: u8,
+    node_count: usize,
+    nodes: Vec<AccessibilityNodeOut>,
+    errors: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct AccessibilityNodeOut {
+    id: usize,
+    parent: Option<usize>,
+    bus_name: String,
+    object_path: String,
+    depth: u8,
+    name: Option<String>,
+    role_name: Option<String>,
+    description: Option<String>,
+    child_count: u32,
+    extents: Option<AccessibilityExtentsOut>,
+    errors: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct AccessibilityExtentsOut {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -629,6 +670,22 @@ impl WmCtl {
             }))
         })
         .await
+    }
+
+    #[tool(
+        description = "Spike semantic UI observation through AT-SPI. Returns a bounded accessibility tree when the desktop/app exposes one; embeds no pixels."
+    )]
+    async fn accessibility_tree(
+        &self,
+        Parameters(p): Parameters<AccessibilityTree>,
+    ) -> Result<Json<AccessibilityTreeOut>, ErrorData> {
+        let max_depth = p.max_depth.unwrap_or(2).clamp(1, 4);
+        let max_children_per_node = p.max_children_per_node.unwrap_or(16).clamp(1, 64);
+        let atspi = wmng_dbus::AtSpi::connect_from_session()
+            .await
+            .map_err(to_err)?;
+        let snapshot = atspi.snapshot(max_depth, max_children_per_node).await;
+        Ok(Json(to_accessibility_tree_out(snapshot)))
     }
 
     #[tool(description = "Focus (activate + raise) a window by id.")]
@@ -1073,6 +1130,39 @@ fn to_screen_update_fast_out(
     }
 }
 
+fn to_accessibility_tree_out(snapshot: wmng_dbus::AccessibilitySnapshot) -> AccessibilityTreeOut {
+    let nodes = snapshot
+        .nodes
+        .into_iter()
+        .map(|node| AccessibilityNodeOut {
+            id: node.id,
+            parent: node.parent,
+            bus_name: node.bus_name,
+            object_path: node.object_path,
+            depth: node.depth,
+            name: node.name,
+            role_name: node.role_name,
+            description: node.description,
+            child_count: node.child_count,
+            extents: node.extents.map(|extents| AccessibilityExtentsOut {
+                x: extents.x,
+                y: extents.y,
+                width: extents.width,
+                height: extents.height,
+            }),
+            errors: node.errors,
+        })
+        .collect::<Vec<_>>();
+    AccessibilityTreeOut {
+        available: snapshot.available,
+        max_depth: snapshot.max_depth,
+        max_children_per_node: snapshot.max_children_per_node,
+        node_count: nodes.len(),
+        nodes,
+        errors: snapshot.errors,
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -1259,5 +1349,42 @@ mod tests {
         assert_eq!(json["focused_window"]["handle"], 42);
         assert_eq!(json["pixel_fallbacks"]["embedded_pixels"], false);
         assert!(json["pixel_fallbacks"]["full_screenshot_tool"].is_string());
+    }
+
+    #[test]
+    fn accessibility_tree_serializes_semantic_nodes_without_pixels() {
+        let snapshot = wmng_dbus::AccessibilitySnapshot {
+            available: true,
+            bus_address: Some("unix:path=/tmp/atspi".to_string()),
+            max_depth: 2,
+            max_children_per_node: 16,
+            nodes: vec![wmng_dbus::AccessibilityNode {
+                id: 0,
+                parent: None,
+                bus_name: "org.a11y.atspi.Registry".to_string(),
+                object_path: "/org/a11y/atspi/accessible/root".to_string(),
+                depth: 0,
+                name: Some("desktop".to_string()),
+                role_name: Some("application".to_string()),
+                description: None,
+                child_count: 1,
+                extents: Some(wmng_dbus::AccessibilityExtents {
+                    x: 10,
+                    y: 20,
+                    width: 640,
+                    height: 480,
+                }),
+                errors: Vec::new(),
+            }],
+            errors: Vec::new(),
+        };
+
+        let json = serde_json::to_value(to_accessibility_tree_out(snapshot))
+            .expect("accessibility tree serializes");
+        assert_eq!(json["available"], true);
+        assert_eq!(json["node_count"], 1);
+        assert_eq!(json["nodes"][0]["role_name"], "application");
+        assert_eq!(json["nodes"][0]["extents"]["width"], 640);
+        assert!(json.get("pixels").is_none());
     }
 }
