@@ -7,6 +7,7 @@ text/JSON desktop state without embedding screenshot pixels:
 - visible actionable window handles
 - geometry, workspace, app identity, and available window actions
 - recent XDamage rectangle metadata when available
+- explicit vision fallback policy and crop-target metadata
 - references to opt-in pixel tools
 
 Pixel tools remain available, but callers should request them only when the
@@ -23,6 +24,11 @@ The intended agent loop is:
 2. Choose a target window/action from the returned handles.
 3. Use control tools such as `focus`, `move_resize`, `key`, `type`, `click`, or
    `scroll`.
-4. Request pixel fallbacks only for visual ambiguity, crop inspection, or
-   debugging.
+4. Read `vision_fallback_policy`.
+5. Request pixel fallbacks only when the policy triggers apply: visual
+   ambiguity, non-semantic surfaces, stale damage, failed-action recovery, or
+   low semantic-adapter coverage.
 
+The fallback order is documented in `docs/vision-fallback-policy.md`. The short
+version is: structured state first, focused crop when available, PNG dirty delta
+when pixels are needed, and full screenshot only as the last resort.

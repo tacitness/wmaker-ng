@@ -254,6 +254,7 @@ struct ObservationOut {
     actionable_windows: Vec<ObservationWindowOut>,
     recent_changes: RecentChangesOut,
     semantic_adapters: Vec<String>,
+    vision_fallback_policy: VisionFallbackPolicyOut,
     pixel_fallbacks: PixelFallbacksOut,
 }
 
@@ -283,6 +284,25 @@ struct PixelFallbacksOut {
     dirty_png_delta_tool: String,
     fast_delta_tool: String,
     local_crop_reference: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct VisionFallbackPolicyOut {
+    policy_version: String,
+    default_lane: String,
+    pixels_required: bool,
+    recommended_next: String,
+    crop_target: Option<CropTargetOut>,
+    escalation_order: Vec<String>,
+    request_pixels_when: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct CropTargetOut {
+    kind: String,
+    handle: Option<u32>,
+    geometry: RectOut,
+    reason: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -639,6 +659,8 @@ impl WmCtl {
                     pointer_summary
                 ),
             };
+            let vision_fallback_policy =
+                vision_fallback_policy_for(active, pointer.child, &windows);
             Ok(Json(ObservationOut {
                 preferred_model_lane: true,
                 summary,
@@ -659,6 +681,7 @@ impl WmCtl {
                         .collect(),
                 },
                 semantic_adapters: Vec::new(),
+                vision_fallback_policy,
                 pixel_fallbacks: PixelFallbacksOut {
                     embedded_pixels: false,
                     full_screenshot_tool: "screenshot".to_string(),
@@ -1163,6 +1186,55 @@ fn to_accessibility_tree_out(snapshot: wmng_dbus::AccessibilitySnapshot) -> Acce
     }
 }
 
+fn vision_fallback_policy_for(
+    active_window: Option<u32>,
+    pointer_window: Option<u32>,
+    windows: &[ObservationWindowOut],
+) -> VisionFallbackPolicyOut {
+    let crop_source = active_window
+        .and_then(|id| windows.iter().find(|window| window.handle == id))
+        .or_else(|| pointer_window.and_then(|id| windows.iter().find(|window| window.handle == id)))
+        .or_else(|| windows.first());
+    let crop_target = crop_source.map(|window| CropTargetOut {
+        kind: "window".to_string(),
+        handle: Some(window.handle),
+        geometry: window.geometry.clone(),
+        reason: if window.active {
+            "focused window is the narrowest useful visual fallback target".to_string()
+        } else {
+            "no focused window; use the best actionable window before full-screen pixels"
+                .to_string()
+        },
+    });
+
+    VisionFallbackPolicyOut {
+        policy_version: "2026-07-03.1".to_string(),
+        default_lane: "structured_observe".to_string(),
+        pixels_required: false,
+        recommended_next: "act_from_structured_state".to_string(),
+        crop_target,
+        escalation_order: vec![
+            "observe".to_string(),
+            "desktop_scene".to_string(),
+            "accessibility_tree".to_string(),
+            "browser_semantic_adapter_when_connected".to_string(),
+            "focused_window_crop_when_available".to_string(),
+            "changed_regions".to_string(),
+            "screenshot".to_string(),
+        ],
+        request_pixels_when: vec![
+            "the target control or content is visually ambiguous after structured observation"
+                .to_string(),
+            "the agent must inspect canvas/image/video or other non-semantic pixels".to_string(),
+            "recent damage overlaps the intended action target and semantic state is stale"
+                .to_string(),
+            "an action failed and the next recovery step requires visual confirmation".to_string(),
+            "accessibility/browser semantic adapters are unavailable or report low coverage"
+                .to_string(),
+        ],
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -1305,23 +1377,24 @@ mod tests {
 
     #[test]
     fn observation_serializes_text_first_contract() {
+        let focused = ObservationWindowOut {
+            handle: 42,
+            title: "Example".to_string(),
+            app: Some("Firefox".to_string()),
+            geometry: RectOut {
+                x: 100,
+                y: 80,
+                width: 800,
+                height: 600,
+            },
+            workspace: Some(0),
+            active: true,
+            actions: vec!["focus".to_string(), "move_resize".to_string()],
+        };
         let observation = ObservationOut {
             preferred_model_lane: true,
             summary: "Focused window 0x2a: Example.".to_string(),
-            focused_window: Some(ObservationWindowOut {
-                handle: 42,
-                title: "Example".to_string(),
-                app: Some("Firefox".to_string()),
-                geometry: RectOut {
-                    x: 100,
-                    y: 80,
-                    width: 800,
-                    height: 600,
-                },
-                workspace: Some(0),
-                active: true,
-                actions: vec!["focus".to_string(), "move_resize".to_string()],
-            }),
+            focused_window: Some(focused.clone()),
             actionable_windows: Vec::new(),
             recent_changes: RecentChangesOut {
                 available: true,
@@ -1335,6 +1408,7 @@ mod tests {
                 }],
             },
             semantic_adapters: Vec::new(),
+            vision_fallback_policy: vision_fallback_policy_for(Some(42), Some(42), &[focused]),
             pixel_fallbacks: PixelFallbacksOut {
                 embedded_pixels: false,
                 full_screenshot_tool: "screenshot".to_string(),
@@ -1348,6 +1422,8 @@ mod tests {
         assert_eq!(json["preferred_model_lane"], true);
         assert_eq!(json["focused_window"]["handle"], 42);
         assert_eq!(json["pixel_fallbacks"]["embedded_pixels"], false);
+        assert_eq!(json["vision_fallback_policy"]["pixels_required"], false);
+        assert_eq!(json["vision_fallback_policy"]["crop_target"]["handle"], 42);
         assert!(json["pixel_fallbacks"]["full_screenshot_tool"].is_string());
     }
 
