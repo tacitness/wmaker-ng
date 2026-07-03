@@ -2,8 +2,9 @@
                               wmaker-ng
                      Window Maker — Next Generation
 
-                       <https://windowmaker.org>
+                       <https://tacitsoft.dev>
                   a TacitSoft modernization initiative
+              honoring upstream: <https://windowmaker.org>
 
                                   by
 
@@ -100,9 +101,13 @@ Daily-driver acceptance gates and measurement loops live in
 Status
 ======
 
-Bootstrapping. This commit establishes the charter and the plan. Scaffolding —
-the Cargo workspace, CI/CD, git hooks, security and supply-chain gating, and
-the first proof-of-concept companion — follows.
+**v0.1.0 released.** Signed deb / rpm / apk packages and static tarballs for
+amd64 + arm64, built and GPG-signed by an OIDC-gated release pipeline. The
+`ng` daemons (automount / power / notify) and the `ai-mcp` control plane are
+functional; object-first observation and the packaging matrix are the active
+workstreams.
+
+Releases: <https://github.com/tacitness/wmaker-ng/releases>
 
 
 Repository topology
@@ -121,10 +126,68 @@ upstream/master` only ever churns upstream history. This repository holds the
 Rust companion workspace and the Python ML tooling.
 
 
-Building
-========
+Quickstart — drive a desktop with your model
+============================================
 
-Not yet. Build instructions land with the scaffolding commit.
+`ai-mcp` speaks standard EWMH / XTEST / XDamage, so it drives **any**
+EWMH-compliant window manager — stock Window Maker straight from your distro
+included. The `tacitness/wmaker-crm` fork is *not* required at runtime; it
+exists to carry upstream-bound core patches (tiling seams, maximize behavior).
+
+### 1. Native — your real X session
+
+Grab the package for your distro from the
+[latest release](https://github.com/tacitness/wmaker-ng/releases/latest):
+
+```bash
+# Debian/Ubuntu               # EL9+/Fedora                # Alpine
+sudo apt install ./wmaker-ng_*_amd64.deb ./wmaker-ai_*_amd64.deb
+sudo dnf install ./wmaker-{ng,ai}-*.x86_64.rpm
+sudo apk add --allow-untrusted ./wmaker-{ng,ai}_*_x86_64.apk
+
+# sanity check against your running X session
+ai-mcp --check
+```
+
+Then register it with any MCP client. Claude Code, for example:
+
+```bash
+claude mcp add wmaker-desktop -- ai-mcp
+```
+
+The model gets `list_windows` / `focus` / `move_resize` / `tile` /
+`move_mouse` / `click` / `type` / `key` / `screenshot` / `desktop_scene` —
+full observe-and-act on the live desktop. The window manager never learns it
+is being driven.
+
+### 2. Sandboxed — a disposable desktop in Docker
+
+The sandbox image bundles Xvfb + Window Maker + `ai-mcp` into one
+MCP-over-stdio container — a scriptable desktop your agent can own:
+
+```bash
+make sandbox-image        # needs the wmaker-crm:headless base (see sandbox/)
+docker run -i --rm wmaker-ai-sandbox            # MCP on stdin/stdout
+
+# as an MCP server in Claude Code:
+claude mcp add wmaker-sandbox -- docker run -i --rm wmaker-ai-sandbox
+```
+
+Public registry images (`public.ecr.aws/y6d2s4r6/wmaker-ai-sandbox`) are
+landing shortly — after that the quickstart is the `docker run` line alone,
+no local build.
+
+See [sandbox/README.md](sandbox/README.md) for the browser-enabled variant.
+
+
+Building from source
+====================
+
+```bash
+make ci-local      # fmt + clippy + tests + audit — full CI parity
+make build         # release binaries into dist/
+make packages      # deb/rpm/apk via nfpm (needs staged cross-builds)
+```
 
 
 License
