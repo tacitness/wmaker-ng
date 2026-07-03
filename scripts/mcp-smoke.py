@@ -283,6 +283,11 @@ def main():
         observation = text_json(call_tool(mcp, "observe"))
         if observation.get("pixel_fallbacks", {}).get("embedded_pixels") is not False:
             raise RuntimeError("observe embedded pixels unexpectedly: {}".format(observation))
+        policy = observation.get("vision_fallback_policy", {})
+        if policy.get("pixels_required") is not False:
+            raise RuntimeError("observe did not default to structured vision policy: {}".format(observation))
+        if not policy.get("escalation_order") or not policy.get("request_pixels_when"):
+            raise RuntimeError("observe returned incomplete vision fallback policy: {}".format(observation))
         observed_window = next(
             (item for item in observation.get("actionable_windows", []) if item.get("handle") == window_id),
             None,
