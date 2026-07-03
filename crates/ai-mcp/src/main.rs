@@ -6,6 +6,10 @@
 //! `wmng-ewmh` (`_NET_*`). Any MCP client connects over stdio and drives a real
 //! Window Maker desktop; the WM never learns it is being driven.
 
+use std::fs;
+use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -17,8 +21,13 @@ use rmcp::transport::stdio;
 use rmcp::{ServiceExt, tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{UnixListener, UnixStream};
 use wmng_ewmh::{Ewmh, TileSlot};
 use wmng_x11::{DamageFeed, MonitorInfo, SharedCapture, X};
+
+const BROWSER_ADAPTER_SCHEMA_VERSION: u16 = 1;
+const DEFAULT_BROWSER_SOCKET_NAME: &str = "wmaker-ai/browser-adapter.sock";
 
 /// The MCP server: holds the shared X connection. Cheap to clone (Arc).
 #[derive(Clone)]
@@ -28,6 +37,12 @@ struct WmCtl {
     diff: Arc<Mutex<DiffEncoder>>,
     damage: Arc<Mutex<DamageFeed>>,
     clipboard: Arc<Mutex<Option<arboard::Clipboard>>>,
+    browser_adapter: BrowserAdapterState,
+}
+
+#[derive(Clone, Default)]
+struct BrowserAdapterState {
+    latest: Arc<Mutex<Option<BrowserAdapterMessage>>>,
 }
 
 // ── Tool parameter / output schemas (auto-generate the MCP contract) ─────────
@@ -442,6 +457,27 @@ struct WaitForIdleOut {
     damage_events: usize,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct BrowserAdapterMessage {
+    schema_version: u16,
+    kind: String,
+    #[serde(default)]
+    extension_id: Option<String>,
+    #[serde(default)]
+    tab_id: Option<i64>,
+    #[serde(default)]
+    payload: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct BrowserAdapterReply {
+    schema_version: u16,
+    ok: bool,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 #[tool_router(server_handler)]
 impl WmCtl {
     // ── Input synthesis (XTEST) ──────────────────────────────────────────────
@@ -634,11 +670,13 @@ impl WmCtl {
     async fn observe(&self) -> Result<Json<ObservationOut>, ErrorData> {
         let x = self.x.clone();
         let damage = self.damage.clone();
+        let browser_adapter = self.browser_adapter.clone();
         run(move || {
             let ewmh = Ewmh::new(&x).map_err(to_err)?;
             let active = ewmh.active_window().map_err(to_err)?;
             let pointer = x.pointer().map_err(to_err)?;
             let outputs = to_monitor_outs(x.monitors().map_err(to_err)?);
+            let browser_adapter_latest = browser_adapter.latest.lock().map_err(lock_err)?.clone();
             let dirty = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
             let dirty_area = dirty.iter().fold(0u32, |total, rect| {
                 total.saturating_add(u32::from(rect.width) * u32::from(rect.height))
@@ -677,7 +715,7 @@ impl WmCtl {
                 .child
                 .map(|id| format!(" pointer over 0x{id:x}."))
                 .unwrap_or_default();
-            let summary = match &focused_window {
+            let mut summary = match &focused_window {
                 Some(w) if w.title.is_empty() => {
                     format!("Focused window 0x{:x}.{}", w.handle, pointer_summary)
                 }
@@ -691,6 +729,18 @@ impl WmCtl {
                     pointer_summary
                 ),
             };
+            let semantic_adapters = browser_adapter_latest
+                .as_ref()
+                .map(|message| {
+                    let suffix = message
+                        .extension_id
+                        .as_deref()
+                        .map(|id| format!(" from extension {id}"))
+                        .unwrap_or_default();
+                    summary.push_str(&format!(" Browser semantic adapter connected{suffix}."));
+                    vec!["browser_native_messaging".to_string()]
+                })
+                .unwrap_or_default();
             let vision_fallback_policy =
                 vision_fallback_policy_for(active, pointer.child, &windows);
             Ok(Json(ObservationOut {
@@ -713,7 +763,7 @@ impl WmCtl {
                         })
                         .collect(),
                 },
-                semantic_adapters: Vec::new(),
+                semantic_adapters,
                 vision_fallback_policy,
                 pixel_fallbacks: PixelFallbacksOut {
                     embedded_pixels: false,
@@ -1340,12 +1390,315 @@ fn vision_fallback_policy_for(
     }
 }
 
+async fn serve_browser_adapter_socket(
+    state: BrowserAdapterState,
+    socket_path: PathBuf,
+) -> anyhow::Result<()> {
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    }
+    if socket_path.exists() {
+        fs::remove_file(&socket_path)?;
+    }
+    let listener = UnixListener::bind(&socket_path)?;
+    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
+    tracing::info!(
+        path = %socket_path.display(),
+        "ai-mcp: browser adapter socket listening"
+    );
+
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(err) = handle_browser_adapter_client(state, stream).await {
+                tracing::warn!(%err, "ai-mcp: browser adapter client failed");
+            }
+        });
+    }
+}
+
+async fn handle_browser_adapter_client(
+    state: BrowserAdapterState,
+    stream: UnixStream,
+) -> anyhow::Result<()> {
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+    while let Some(line) = lines.next_line().await? {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let reply = match serde_json::from_str::<BrowserAdapterMessage>(&line) {
+            Ok(message) => handle_browser_adapter_message(&state, message),
+            Err(err) => BrowserAdapterReply {
+                schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+                ok: false,
+                kind: "error".to_string(),
+                error: Some(format!("invalid browser adapter message: {err}")),
+            },
+        };
+        let mut encoded = serde_json::to_vec(&reply)?;
+        encoded.push(b'\n');
+        writer.write_all(&encoded).await?;
+    }
+    Ok(())
+}
+
+fn handle_browser_adapter_message(
+    state: &BrowserAdapterState,
+    message: BrowserAdapterMessage,
+) -> BrowserAdapterReply {
+    if message.schema_version != BROWSER_ADAPTER_SCHEMA_VERSION {
+        return BrowserAdapterReply {
+            schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+            ok: false,
+            kind: message.kind,
+            error: Some(format!(
+                "unsupported schema_version {}; expected {}",
+                message.schema_version, BROWSER_ADAPTER_SCHEMA_VERSION
+            )),
+        };
+    }
+
+    match message.kind.as_str() {
+        "ping" => BrowserAdapterReply {
+            schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+            ok: true,
+            kind: "pong".to_string(),
+            error: None,
+        },
+        "browser.summary" | "browser.controls" | "browser.action_result" => {
+            match state.latest.lock() {
+                Ok(mut latest) => {
+                    *latest = Some(message.clone());
+                    BrowserAdapterReply {
+                        schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+                        ok: true,
+                        kind: format!("{}.ack", message.kind),
+                        error: None,
+                    }
+                }
+                Err(err) => BrowserAdapterReply {
+                    schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+                    ok: false,
+                    kind: message.kind,
+                    error: Some(format!("browser adapter state lock failed: {err}")),
+                },
+            }
+        }
+        other => BrowserAdapterReply {
+            schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+            ok: false,
+            kind: other.to_string(),
+            error: Some(format!("unsupported browser adapter message kind: {other}")),
+        },
+    }
+}
+
+fn browser_socket_path() -> PathBuf {
+    std::env::var_os("WMAKER_AI_BROWSER_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"));
+            runtime.join(DEFAULT_BROWSER_SOCKET_NAME)
+        })
+}
+
+fn browser_socket_enabled() -> bool {
+    !matches!(
+        std::env::var("WMAKER_AI_BROWSER_SOCKET").as_deref(),
+        Ok("0") | Ok("false") | Ok("off")
+    )
+}
+
+fn run_browser_host(args: &[String]) -> anyhow::Result<()> {
+    let mut socket_path = browser_socket_path();
+    let mut allowed_extension_ids = allowed_extension_ids_from_env();
+    let mut allow_any_extension = std::env::var("WMAKER_AI_BROWSER_ALLOW_ANY_EXTENSION")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--socket" => {
+                i += 1;
+                let Some(path) = args.get(i) else {
+                    anyhow::bail!("--socket requires a path");
+                };
+                socket_path = PathBuf::from(path);
+            }
+            "--allow-extension-id" => {
+                i += 1;
+                let Some(id) = args.get(i) else {
+                    anyhow::bail!("--allow-extension-id requires an extension id");
+                };
+                allowed_extension_ids.push(id.clone());
+            }
+            "--allow-any-extension" => allow_any_extension = true,
+            "--help" | "-h" => {
+                print_browser_host_help();
+                return Ok(());
+            }
+            other => anyhow::bail!("unknown browser-host argument: {other}"),
+        }
+        i += 1;
+    }
+
+    if allowed_extension_ids.is_empty() && !allow_any_extension {
+        anyhow::bail!(
+            "browser-host requires at least one allowed extension id; pass --allow-extension-id or set WMAKER_AI_BROWSER_ALLOWED_EXTENSION_IDS"
+        );
+    }
+
+    loop {
+        let Some(message) = read_native_message()? else {
+            return Ok(());
+        };
+        let reply = forward_native_message(
+            &socket_path,
+            &allowed_extension_ids,
+            allow_any_extension,
+            message,
+        );
+        write_native_message(&reply)?;
+    }
+}
+
+fn allowed_extension_ids_from_env() -> Vec<String> {
+    std::env::var("WMAKER_AI_BROWSER_ALLOWED_EXTENSION_IDS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn forward_native_message(
+    socket_path: &PathBuf,
+    allowed_extension_ids: &[String],
+    allow_any_extension: bool,
+    value: serde_json::Value,
+) -> serde_json::Value {
+    let message = match serde_json::from_value::<BrowserAdapterMessage>(value) {
+        Ok(message) => message,
+        Err(err) => {
+            return serde_json::json!({
+                "schema_version": BROWSER_ADAPTER_SCHEMA_VERSION,
+                "ok": false,
+                "kind": "error",
+                "error": format!("invalid message schema: {err}")
+            });
+        }
+    };
+
+    if !allow_any_extension {
+        match &message.extension_id {
+            Some(id) if allowed_extension_ids.iter().any(|allowed| allowed == id) => {}
+            Some(id) => {
+                return serde_json::json!({
+                    "schema_version": BROWSER_ADAPTER_SCHEMA_VERSION,
+                    "ok": false,
+                    "kind": message.kind,
+                    "error": format!("extension id {id} is not allowed")
+                });
+            }
+            None => {
+                return serde_json::json!({
+                    "schema_version": BROWSER_ADAPTER_SCHEMA_VERSION,
+                    "ok": false,
+                    "kind": message.kind,
+                    "error": "extension_id is required"
+                });
+            }
+        }
+    }
+
+    match send_socket_message(socket_path, &message) {
+        Ok(reply) => reply,
+        Err(err) => serde_json::json!({
+            "schema_version": BROWSER_ADAPTER_SCHEMA_VERSION,
+            "ok": false,
+            "kind": message.kind,
+            "error": format!("ai-mcp socket bridge failed: {err}")
+        }),
+    }
+}
+
+fn send_socket_message(
+    socket_path: &PathBuf,
+    message: &BrowserAdapterMessage,
+) -> anyhow::Result<serde_json::Value> {
+    let mut stream = std::os::unix::net::UnixStream::connect(socket_path)?;
+    let mut encoded = serde_json::to_vec(message)?;
+    encoded.push(b'\n');
+    stream.write_all(&encoded)?;
+    stream.flush()?;
+
+    let mut reader = std::io::BufReader::new(stream);
+    let mut reply = String::new();
+    std::io::BufRead::read_line(&mut reader, &mut reply)?;
+    if reply.trim().is_empty() {
+        anyhow::bail!("empty reply from ai-mcp socket");
+    }
+    Ok(serde_json::from_str(reply.trim_end())?)
+}
+
+fn read_native_message() -> anyhow::Result<Option<serde_json::Value>> {
+    let mut len = [0u8; 4];
+    let mut stdin = std::io::stdin().lock();
+    match stdin.read_exact(&mut len) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(err) => return Err(err.into()),
+    }
+    let len = u32::from_le_bytes(len) as usize;
+    if len > 16 * 1024 * 1024 {
+        anyhow::bail!("native message too large: {len} bytes");
+    }
+    let mut buf = vec![0u8; len];
+    stdin.read_exact(&mut buf)?;
+    Ok(Some(serde_json::from_slice(&buf)?))
+}
+
+fn write_native_message(value: &serde_json::Value) -> anyhow::Result<()> {
+    let encoded = serde_json::to_vec(value)?;
+    if encoded.len() > u32::MAX as usize {
+        anyhow::bail!("native response too large: {} bytes", encoded.len());
+    }
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(&(encoded.len() as u32).to_le_bytes())?;
+    stdout.write_all(&encoded)?;
+    stdout.flush()?;
+    Ok(())
+}
+
+fn print_browser_host_help() {
+    eprintln!(
+        "Usage: ai-mcp browser-host [--socket PATH] --allow-extension-id EXTENSION_ID\n\n\
+         Chrome/Brave native messaging host. Reads length-prefixed JSON from\n\
+         stdin, validates extension_id against the allowlist, and forwards\n\
+         schema-versioned messages to ai-mcp over an owner-only Unix socket."
+    );
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--version" || arg == "-V") {
         println!("ai-mcp {}", version());
         return Ok(());
+    }
+    if args.first().is_some_and(|arg| arg == "browser-host") {
+        return run_browser_host(&args[1..]);
     }
     if args.iter().any(|arg| arg == "--check") {
         check_runtime()?;
@@ -1360,6 +1713,16 @@ async fn main() -> anyhow::Result<()> {
     let x = Arc::new(X::connect()?);
     let capture = Arc::new(Mutex::new(x.shared_capture()?));
     let damage = Arc::new(Mutex::new(x.damage_feed()?));
+    let browser_adapter = BrowserAdapterState::default();
+    if browser_socket_enabled() {
+        let socket_state = browser_adapter.clone();
+        let socket_path = browser_socket_path();
+        tokio::spawn(async move {
+            if let Err(err) = serve_browser_adapter_socket(socket_state, socket_path).await {
+                tracing::error!(%err, "ai-mcp: browser adapter socket stopped");
+            }
+        });
+    }
     tracing::info!("ai-mcp: connected to X, serving MCP over stdio");
     let service = WmCtl {
         x,
@@ -1367,6 +1730,7 @@ async fn main() -> anyhow::Result<()> {
         diff: Arc::new(Mutex::new(DiffEncoder::new(diff_config_from_env()))),
         damage,
         clipboard: Arc::new(Mutex::new(None)),
+        browser_adapter,
     }
     .serve(stdio())
     .await?;
@@ -1656,5 +2020,94 @@ mod tests {
         assert_eq!(json["nodes"][0]["role_name"], "application");
         assert_eq!(json["nodes"][0]["extents"]["width"], 640);
         assert!(json.get("pixels").is_none());
+    }
+
+    #[test]
+    fn browser_adapter_message_acknowledges_supported_schema() {
+        let state = BrowserAdapterState::default();
+        let message = BrowserAdapterMessage {
+            schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+            kind: "browser.summary".to_string(),
+            extension_id: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
+            tab_id: Some(1),
+            payload: serde_json::json!({"title": "Example"}),
+        };
+
+        let reply = handle_browser_adapter_message(&state, message);
+
+        assert!(reply.ok);
+        assert_eq!(reply.kind, "browser.summary.ack");
+        assert!(
+            state
+                .latest
+                .lock()
+                .expect("state lock")
+                .as_ref()
+                .is_some_and(|latest| latest.kind == "browser.summary")
+        );
+    }
+
+    #[test]
+    fn browser_adapter_rejects_unsupported_schema() {
+        let state = BrowserAdapterState::default();
+        let reply = handle_browser_adapter_message(
+            &state,
+            BrowserAdapterMessage {
+                schema_version: BROWSER_ADAPTER_SCHEMA_VERSION + 1,
+                kind: "browser.summary".to_string(),
+                extension_id: None,
+                tab_id: None,
+                payload: serde_json::Value::Null,
+            },
+        );
+
+        assert!(!reply.ok);
+        assert!(
+            reply
+                .error
+                .as_deref()
+                .expect("error")
+                .contains("unsupported schema_version")
+        );
+    }
+
+    #[test]
+    fn native_host_rejects_missing_extension_id_before_socket_connect() {
+        let reply = forward_native_message(
+            &PathBuf::from("/tmp/wmaker-ai-test-missing.sock"),
+            &["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()],
+            false,
+            serde_json::json!({
+                "schema_version": BROWSER_ADAPTER_SCHEMA_VERSION,
+                "kind": "browser.summary",
+                "payload": {}
+            }),
+        );
+
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["error"], "extension_id is required");
+    }
+
+    #[test]
+    fn native_host_rejects_unlisted_extension_id_before_socket_connect() {
+        let reply = forward_native_message(
+            &PathBuf::from("/tmp/wmaker-ai-test-unlisted.sock"),
+            &["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()],
+            false,
+            serde_json::json!({
+                "schema_version": BROWSER_ADAPTER_SCHEMA_VERSION,
+                "kind": "browser.summary",
+                "extension_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "payload": {}
+            }),
+        );
+
+        assert_eq!(reply["ok"], false);
+        assert!(
+            reply["error"]
+                .as_str()
+                .expect("error")
+                .contains("not allowed")
+        );
     }
 }
