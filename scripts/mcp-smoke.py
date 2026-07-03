@@ -276,11 +276,15 @@ def main():
         window = find_window(mcp, args.title, args.timeout)
         window_id = window["id"]
         scene = text_json(call_tool(mcp, "desktop_scene"))
-        if "screen" not in scene or "windows" not in scene or "focus" not in scene:
+        if "screen" not in scene or "outputs" not in scene or "windows" not in scene or "focus" not in scene:
             raise RuntimeError("desktop_scene returned malformed payload: {}".format(scene))
+        if not scene.get("outputs"):
+            raise RuntimeError("desktop_scene returned no monitor/output metadata: {}".format(scene))
         if not any(item.get("id") == window_id for item in scene.get("windows", [])):
             raise RuntimeError("desktop_scene did not include smoke window: {}".format(scene))
         observation = text_json(call_tool(mcp, "observe"))
+        if not observation.get("outputs"):
+            raise RuntimeError("observe returned no monitor/output metadata: {}".format(observation))
         if observation.get("pixel_fallbacks", {}).get("embedded_pixels") is not False:
             raise RuntimeError("observe embedded pixels unexpectedly: {}".format(observation))
         policy = observation.get("vision_fallback_policy", {})
@@ -294,6 +298,8 @@ def main():
         )
         if not observed_window:
             raise RuntimeError("observe did not include smoke window: {}".format(observation))
+        if not observed_window.get("output"):
+            raise RuntimeError("observe did not associate smoke window with an output: {}".format(observation))
         accessibility = text_json(call_tool(mcp, "accessibility_tree", {
             "max_depth": 1,
             "max_children_per_node": 8,

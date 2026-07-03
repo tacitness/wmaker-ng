@@ -18,7 +18,7 @@ use rmcp::{ServiceExt, tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use wmng_ewmh::{Ewmh, TileSlot};
-use wmng_x11::{DamageFeed, SharedCapture, X};
+use wmng_x11::{DamageFeed, MonitorInfo, SharedCapture, X};
 
 /// The MCP server: holds the shared X connection. Cheap to clone (Arc).
 #[derive(Clone)]
@@ -220,6 +220,7 @@ struct SceneWindowOut {
     stacking_index: Option<usize>,
     transient_for: Option<u32>,
     group_leader: Option<u32>,
+    output: Option<WindowOutputOut>,
     capabilities: WindowCapabilitiesOut,
 }
 
@@ -241,6 +242,7 @@ struct FocusOut {
 #[derive(Serialize, JsonSchema)]
 struct DesktopSceneOut {
     screen: RectOut,
+    outputs: Vec<MonitorOut>,
     focus: FocusOut,
     stacking_order: Vec<u32>,
     windows: Vec<SceneWindowOut>,
@@ -250,6 +252,7 @@ struct DesktopSceneOut {
 struct ObservationOut {
     preferred_model_lane: bool,
     summary: String,
+    outputs: Vec<MonitorOut>,
     focused_window: Option<ObservationWindowOut>,
     actionable_windows: Vec<ObservationWindowOut>,
     recent_changes: RecentChangesOut,
@@ -264,9 +267,27 @@ struct ObservationWindowOut {
     title: String,
     app: Option<String>,
     geometry: RectOut,
+    output: Option<WindowOutputOut>,
     workspace: Option<u32>,
     active: bool,
     actions: Vec<String>,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+struct MonitorOut {
+    name: String,
+    geometry: RectOut,
+    width_mm: Option<u32>,
+    height_mm: Option<u32>,
+    primary: bool,
+    automatic: bool,
+    output_count: u16,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+struct WindowOutputOut {
+    name: String,
+    local_geometry: RectOut,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -302,6 +323,7 @@ struct CropTargetOut {
     kind: String,
     handle: Option<u32>,
     geometry: RectOut,
+    output: Option<WindowOutputOut>,
     reason: String,
 }
 
@@ -540,6 +562,7 @@ impl WmCtl {
             let ewmh = Ewmh::new(&x).map_err(to_err)?;
             let active = ewmh.active_window().map_err(to_err)?;
             let pointer = x.pointer().map_err(to_err)?;
+            let outputs = to_monitor_outs(x.monitors().map_err(to_err)?);
             let stacking_order = ewmh.stacking_windows().map_err(to_err)?;
             let windows = ewmh
                 .list_windows()
@@ -547,18 +570,20 @@ impl WmCtl {
                 .into_iter()
                 .map(|w| {
                     let stacking_index = stacking_order.iter().position(|id| *id == w.id);
+                    let geometry = RectOut {
+                        x: w.x.into(),
+                        y: w.y.into(),
+                        width: w.width.into(),
+                        height: w.height.into(),
+                    };
+                    let output = output_for_rect(&geometry, &outputs);
                     SceneWindowOut {
                         id: w.id,
                         title: w.title,
                         class: w.class,
                         instance: w.instance,
                         pid: w.pid,
-                        geometry: RectOut {
-                            x: w.x.into(),
-                            y: w.y.into(),
-                            width: w.width.into(),
-                            height: w.height.into(),
-                        },
+                        geometry,
                         workspace: w.workspace,
                         mapped: w.mapped,
                         minimized: w.minimized,
@@ -568,6 +593,7 @@ impl WmCtl {
                         stacking_index,
                         transient_for: w.transient_for,
                         group_leader: w.group_leader,
+                        output,
                         capabilities: WindowCapabilitiesOut {
                             ewmh_focus: true,
                             ewmh_move_resize: true,
@@ -586,6 +612,7 @@ impl WmCtl {
                     width: width.into(),
                     height: height.into(),
                 },
+                outputs,
                 focus: FocusOut {
                     active_window: active,
                     pointer: PointerOut {
@@ -611,6 +638,7 @@ impl WmCtl {
             let ewmh = Ewmh::new(&x).map_err(to_err)?;
             let active = ewmh.active_window().map_err(to_err)?;
             let pointer = x.pointer().map_err(to_err)?;
+            let outputs = to_monitor_outs(x.monitors().map_err(to_err)?);
             let dirty = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
             let dirty_area = dirty.iter().fold(0u32, |total, rect| {
                 total.saturating_add(u32::from(rect.width) * u32::from(rect.height))
@@ -620,23 +648,27 @@ impl WmCtl {
                 .map_err(to_err)?
                 .into_iter()
                 .filter(|w| w.mapped && !w.minimized)
-                .map(|w| ObservationWindowOut {
-                    handle: w.id,
-                    title: w.title,
-                    app: w.class.or(w.instance),
-                    geometry: RectOut {
+                .map(|w| {
+                    let geometry = RectOut {
                         x: w.x.into(),
                         y: w.y.into(),
                         width: w.width.into(),
                         height: w.height.into(),
-                    },
-                    workspace: w.workspace,
-                    active: active.is_some_and(|id| id == w.id),
-                    actions: vec![
-                        "focus".to_string(),
-                        "move_resize".to_string(),
-                        "close_window".to_string(),
-                    ],
+                    };
+                    ObservationWindowOut {
+                        handle: w.id,
+                        title: w.title,
+                        app: w.class.or(w.instance),
+                        output: output_for_rect(&geometry, &outputs),
+                        geometry,
+                        workspace: w.workspace,
+                        active: active.is_some_and(|id| id == w.id),
+                        actions: vec![
+                            "focus".to_string(),
+                            "move_resize".to_string(),
+                            "close_window".to_string(),
+                        ],
+                    }
                 })
                 .collect::<Vec<_>>();
             windows.sort_by_key(|w| (!w.active, w.handle));
@@ -664,6 +696,7 @@ impl WmCtl {
             Ok(Json(ObservationOut {
                 preferred_model_lane: true,
                 summary,
+                outputs,
                 focused_window,
                 actionable_windows: windows,
                 recent_changes: RecentChangesOut {
@@ -1186,6 +1219,77 @@ fn to_accessibility_tree_out(snapshot: wmng_dbus::AccessibilitySnapshot) -> Acce
     }
 }
 
+fn to_monitor_outs(monitors: Vec<MonitorInfo>) -> Vec<MonitorOut> {
+    monitors
+        .into_iter()
+        .map(|monitor| MonitorOut {
+            name: monitor.name,
+            geometry: RectOut {
+                x: i32::from(monitor.x),
+                y: i32::from(monitor.y),
+                width: u32::from(monitor.width),
+                height: u32::from(monitor.height),
+            },
+            width_mm: monitor.width_mm,
+            height_mm: monitor.height_mm,
+            primary: monitor.primary,
+            automatic: monitor.automatic,
+            output_count: monitor.output_count,
+        })
+        .collect()
+}
+
+fn output_for_rect(rect: &RectOut, outputs: &[MonitorOut]) -> Option<WindowOutputOut> {
+    let output = outputs
+        .iter()
+        .max_by_key(|output| intersection_area(rect, &output.geometry))?;
+    let intersection = intersection_area(rect, &output.geometry);
+    if intersection == 0 && !rect_center_inside(rect, &output.geometry) {
+        return None;
+    }
+    Some(WindowOutputOut {
+        name: output.name.clone(),
+        local_geometry: RectOut {
+            x: rect.x - output.geometry.x,
+            y: rect.y - output.geometry.y,
+            width: rect.width,
+            height: rect.height,
+        },
+    })
+}
+
+fn intersection_area(a: &RectOut, b: &RectOut) -> u64 {
+    let left = a.x.max(b.x);
+    let top = a.y.max(b.y);
+    let right = rect_right(a).min(rect_right(b));
+    let bottom = rect_bottom(a).min(rect_bottom(b));
+    if right <= left || bottom <= top {
+        return 0;
+    }
+    let width = u64::try_from(right - left).unwrap_or(0);
+    let height = u64::try_from(bottom - top).unwrap_or(0);
+    width * height
+}
+
+fn rect_center_inside(rect: &RectOut, output: &RectOut) -> bool {
+    let center_x = rect.x + i32::try_from(rect.width / 2).unwrap_or(i32::MAX);
+    let center_y = rect.y + i32::try_from(rect.height / 2).unwrap_or(i32::MAX);
+    center_x >= output.x
+        && center_x < rect_right(output)
+        && center_y >= output.y
+        && center_y < rect_bottom(output)
+}
+
+fn rect_right(rect: &RectOut) -> i32 {
+    rect.x
+        .saturating_add(i32::try_from(rect.width).unwrap_or(i32::MAX))
+}
+
+fn rect_bottom(rect: &RectOut) -> i32 {
+    rect.y
+        .saturating_add(i32::try_from(rect.height).unwrap_or(i32::MAX))
+}
+
 fn vision_fallback_policy_for(
     active_window: Option<u32>,
     pointer_window: Option<u32>,
@@ -1199,6 +1303,7 @@ fn vision_fallback_policy_for(
         kind: "window".to_string(),
         handle: Some(window.handle),
         geometry: window.geometry.clone(),
+        output: window.output.clone(),
         reason: if window.active {
             "focused window is the narrowest useful visual fallback target".to_string()
         } else {
@@ -1318,8 +1423,30 @@ fn diff_config_from_env() -> DiffConfig {
 mod tests {
     use super::*;
 
+    fn rect(x: i32, y: i32, width: u32, height: u32) -> RectOut {
+        RectOut {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn monitor(name: &str, x: i32, y: i32, width: u32, height: u32) -> MonitorOut {
+        MonitorOut {
+            name: name.to_string(),
+            geometry: rect(x, y, width, height),
+            width_mm: None,
+            height_mm: None,
+            primary: x == 0 && y == 0,
+            automatic: true,
+            output_count: 1,
+        }
+    }
+
     #[test]
     fn desktop_scene_serializes_object_first_contract() {
+        let outputs = vec![monitor("HDMI-1", 0, 0, 1280, 720)];
         let scene = DesktopSceneOut {
             screen: RectOut {
                 x: 0,
@@ -1327,6 +1454,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
+            outputs: outputs.clone(),
             focus: FocusOut {
                 active_window: Some(42),
                 pointer: PointerOut {
@@ -1357,6 +1485,15 @@ mod tests {
                 stacking_index: Some(1),
                 transient_for: None,
                 group_leader: Some(42),
+                output: output_for_rect(
+                    &RectOut {
+                        x: 100,
+                        y: 80,
+                        width: 800,
+                        height: 600,
+                    },
+                    &outputs,
+                ),
                 capabilities: WindowCapabilitiesOut {
                     ewmh_focus: true,
                     ewmh_move_resize: true,
@@ -1372,11 +1509,14 @@ mod tests {
         assert_eq!(json["focus"]["active_window"], 42);
         assert_eq!(json["windows"][0]["class"], "Firefox");
         assert_eq!(json["windows"][0]["geometry"]["x"], 100);
+        assert_eq!(json["windows"][0]["output"]["name"], "HDMI-1");
+        assert_eq!(json["windows"][0]["output"]["local_geometry"]["x"], 100);
         assert_eq!(json["windows"][0]["capabilities"]["xtest_input"], true);
     }
 
     #[test]
     fn observation_serializes_text_first_contract() {
+        let outputs = vec![monitor("HDMI-1", 0, 0, 1280, 720)];
         let focused = ObservationWindowOut {
             handle: 42,
             title: "Example".to_string(),
@@ -1387,6 +1527,15 @@ mod tests {
                 width: 800,
                 height: 600,
             },
+            output: output_for_rect(
+                &RectOut {
+                    x: 100,
+                    y: 80,
+                    width: 800,
+                    height: 600,
+                },
+                &outputs,
+            ),
             workspace: Some(0),
             active: true,
             actions: vec!["focus".to_string(), "move_resize".to_string()],
@@ -1394,6 +1543,7 @@ mod tests {
         let observation = ObservationOut {
             preferred_model_lane: true,
             summary: "Focused window 0x2a: Example.".to_string(),
+            outputs,
             focused_window: Some(focused.clone()),
             actionable_windows: Vec::new(),
             recent_changes: RecentChangesOut {
@@ -1421,10 +1571,54 @@ mod tests {
         let json = serde_json::to_value(&observation).expect("observation serializes");
         assert_eq!(json["preferred_model_lane"], true);
         assert_eq!(json["focused_window"]["handle"], 42);
+        assert_eq!(json["outputs"][0]["name"], "HDMI-1");
+        assert_eq!(json["focused_window"]["output"]["name"], "HDMI-1");
         assert_eq!(json["pixel_fallbacks"]["embedded_pixels"], false);
         assert_eq!(json["vision_fallback_policy"]["pixels_required"], false);
         assert_eq!(json["vision_fallback_policy"]["crop_target"]["handle"], 42);
+        assert_eq!(
+            json["vision_fallback_policy"]["crop_target"]["output"]["name"],
+            "HDMI-1"
+        );
         assert!(json["pixel_fallbacks"]["full_screenshot_tool"].is_string());
+    }
+
+    #[test]
+    fn output_for_rect_handles_required_monitor_layouts() {
+        let single = vec![monitor("root", 0, 0, 1280, 720)];
+        assert_eq!(
+            output_for_rect(&rect(200, 100, 300, 200), &single)
+                .expect("single monitor match")
+                .name,
+            "root"
+        );
+
+        let dual_horizontal = vec![
+            monitor("left", 0, 0, 1920, 1080),
+            monitor("right", 1920, 0, 1920, 1080),
+        ];
+        let out = output_for_rect(&rect(2000, 100, 640, 480), &dual_horizontal)
+            .expect("right monitor match");
+        assert_eq!(out.name, "right");
+        assert_eq!(out.local_geometry.x, 80);
+
+        let dual_vertical = vec![
+            monitor("top", 0, 0, 1600, 900),
+            monitor("bottom", 0, 900, 1600, 900),
+        ];
+        let out = output_for_rect(&rect(200, 980, 640, 480), &dual_vertical)
+            .expect("bottom monitor match");
+        assert_eq!(out.name, "bottom");
+        assert_eq!(out.local_geometry.y, 80);
+
+        let mixed = vec![
+            monitor("wide", 0, 0, 2560, 1440),
+            monitor("portrait", 2560, 0, 1080, 1920),
+        ];
+        let out =
+            output_for_rect(&rect(2500, 200, 300, 800), &mixed).expect("largest intersection wins");
+        assert_eq!(out.name, "portrait");
+        assert_eq!(out.local_geometry.x, -60);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 //! - **XShm** — fast shared-memory capture ([`X::capture`] → [`Capture::frame`])
 //! - **XDamage** — dirty-rectangle change feed ([`X::damage_feed`])
 //! - **XFixes** — cursor image ([`X::cursor_image`])
+//! - **RandR** — monitor/output geometry ([`X::monitors`])
 //!
 //! Pure-Rust x11rb (no `libxcb` link). All fallible calls return [`Error`]; the
 //! hot paths never panic.
@@ -27,6 +28,7 @@ use std::sync::Arc;
 
 use x11rb::connection::{Connection, RequestConnection as _};
 use x11rb::protocol::damage::ConnectionExt as _;
+use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::xfixes::ConnectionExt as _;
 use x11rb::protocol::xproto::{
     BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as _, KEY_PRESS_EVENT,
@@ -106,6 +108,68 @@ impl X {
     /// Root dimensions in pixels.
     pub fn dimensions(&self) -> (u16, u16) {
         (self.width, self.height)
+    }
+    /// Monitor/output geometry from RandR, falling back to one root-sized output.
+    pub fn monitors(&self) -> Result<Vec<MonitorInfo>> {
+        let fallback = || {
+            vec![MonitorInfo {
+                name: "root".to_string(),
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
+                width_mm: None,
+                height_mm: None,
+                primary: true,
+                automatic: true,
+                output_count: 1,
+            }]
+        };
+
+        if self
+            .conn
+            .extension_information(x11rb::protocol::randr::X11_EXTENSION_NAME)?
+            .is_none()
+        {
+            return Ok(fallback());
+        }
+
+        let version = match self.conn.randr_query_version(1, 5)?.reply() {
+            Ok(version) if version.major_version > 1 || version.minor_version >= 5 => version,
+            Ok(_) | Err(_) => return Ok(fallback()),
+        };
+        let _ = version;
+
+        let reply = match self.conn.randr_get_monitors(self.root, true)?.reply() {
+            Ok(reply) if !reply.monitors.is_empty() => reply,
+            Ok(_) | Err(_) => return Ok(fallback()),
+        };
+
+        Ok(reply
+            .monitors
+            .into_iter()
+            .map(|monitor| MonitorInfo {
+                name: self
+                    .conn
+                    .get_atom_name(monitor.name)
+                    .ok()
+                    .and_then(|cookie| cookie.reply().ok())
+                    .map(|name| String::from_utf8_lossy(&name.name).into_owned())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| format!("output-{}", monitor.name)),
+                x: monitor.x,
+                y: monitor.y,
+                width: monitor.width,
+                height: monitor.height,
+                width_mm: (monitor.width_in_millimeters != 0)
+                    .then_some(monitor.width_in_millimeters),
+                height_mm: (monitor.height_in_millimeters != 0)
+                    .then_some(monitor.height_in_millimeters),
+                primary: monitor.primary,
+                automatic: monitor.automatic,
+                output_count: monitor.outputs.len() as u16,
+            })
+            .collect())
     }
     /// Root window depth.
     pub fn root_depth(&self) -> u8 {
@@ -309,6 +373,21 @@ pub struct CursorImage {
     pub xhot: u16,
     pub yhot: u16,
     pub pixels: Vec<u32>,
+}
+
+/// RandR monitor/output geometry in root coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitorInfo {
+    pub name: String,
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+    pub width_mm: Option<u32>,
+    pub height_mm: Option<u32>,
+    pub primary: bool,
+    pub automatic: bool,
+    pub output_count: u16,
 }
 
 /// Pointer position on the root window.
