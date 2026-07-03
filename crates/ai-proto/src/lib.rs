@@ -14,6 +14,7 @@
 //!
 //! Pixel-rect tier ships first (Week 3, PLAN §8).
 
+use std::io::Cursor;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -291,6 +292,213 @@ pub enum Error {
 
     #[error("PNG encoding failed: {0}")]
     Png(#[from] png::EncodingError),
+
+    #[error("PNG decoding failed: {0}")]
+    PngDecoding(#[from] png::DecodingError),
+
+    #[error("framebuffer cache has not been initialized with a keyframe")]
+    CacheUninitialized,
+
+    #[error("screen dimensions changed from {old_width}x{old_height} to {new_width}x{new_height}")]
+    ScreenDimensionsChanged {
+        old_width: u16,
+        old_height: u16,
+        new_width: u16,
+        new_height: u16,
+    },
+
+    #[error(
+        "region PNG dimensions do not match rect {rect_width}x{rect_height}: got {png_width}x{png_height}"
+    )]
+    RegionDimensionsMismatch {
+        rect_width: u16,
+        rect_height: u16,
+        png_width: u32,
+        png_height: u32,
+    },
+
+    #[error("region {rect:?} is outside framebuffer {width}x{height}")]
+    RegionOutOfBounds { rect: Rect, width: u16, height: u16 },
+
+    #[error("unsupported PNG color type for framebuffer cache: {0:?}")]
+    UnsupportedPngColor(png::ColorType),
+}
+
+/// Local framebuffer reconstruction from model-cheap screen updates.
+///
+/// This cache is deliberately not a model-facing observation. It maintains
+/// pixels locally from keyframes and PNG dirty deltas so later code can render a
+/// full screen or bounded crop only when a vision fallback/debug path asks.
+#[derive(Debug, Clone, Default)]
+pub struct FramebufferCache {
+    width: u16,
+    height: u16,
+    bytes: Vec<u8>,
+}
+
+impl FramebufferCache {
+    const BPP: u8 = 4;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        !self.bytes.is_empty()
+    }
+
+    pub fn dimensions(&self) -> Option<(u16, u16)> {
+        self.is_initialized().then_some((self.width, self.height))
+    }
+
+    pub fn ingest(&mut self, update: &ScreenUpdate) -> Result<(), Error> {
+        match update.kind {
+            UpdateKind::Keyframe => {
+                self.width = update.width;
+                self.height = update.height;
+                self.bytes =
+                    vec![0; update.width as usize * update.height as usize * Self::BPP as usize];
+            }
+            UpdateKind::Delta => {
+                if !self.is_initialized() {
+                    return Err(Error::CacheUninitialized);
+                }
+                self.require_dimensions(update.width, update.height)?;
+            }
+        }
+
+        for region in &update.regions {
+            self.apply_png_region(region)?;
+        }
+        Ok(())
+    }
+
+    pub fn render_full_png(&self) -> Result<Vec<u8>, Error> {
+        self.require_initialized()?;
+        encode_rect_png(
+            &self.bytes,
+            self.width,
+            self.height,
+            Self::BPP,
+            Rect {
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
+            },
+        )
+    }
+
+    pub fn render_crop_png(&self, rect: Rect) -> Result<Vec<u8>, Error> {
+        self.require_initialized()?;
+        let clipped = clip_cache_rect(self.width, self.height, rect);
+        if clipped.area() == 0 {
+            return Err(Error::RegionOutOfBounds {
+                rect,
+                width: self.width,
+                height: self.height,
+            });
+        }
+        encode_rect_png(&self.bytes, self.width, self.height, Self::BPP, clipped)
+    }
+
+    fn apply_png_region(&mut self, region: &EncodedRegion) -> Result<(), Error> {
+        let decoded = decode_png_rgba(&region.png)?;
+        if decoded.width != u32::from(region.rect.width)
+            || decoded.height != u32::from(region.rect.height)
+        {
+            return Err(Error::RegionDimensionsMismatch {
+                rect_width: region.rect.width,
+                rect_height: region.rect.height,
+                png_width: decoded.width,
+                png_height: decoded.height,
+            });
+        }
+        if region.rect.x.saturating_add(region.rect.width) > self.width
+            || region.rect.y.saturating_add(region.rect.height) > self.height
+        {
+            return Err(Error::RegionOutOfBounds {
+                rect: region.rect,
+                width: self.width,
+                height: self.height,
+            });
+        }
+
+        let bpp = Self::BPP as usize;
+        let cache_stride = self.width as usize * bpp;
+        let region_width = region.rect.width as usize;
+        for y in 0..region.rect.height as usize {
+            let src_row = y * region_width * bpp;
+            let dst_row =
+                (region.rect.y as usize + y) * cache_stride + region.rect.x as usize * bpp;
+            for x in 0..region_width {
+                let src = src_row + x * bpp;
+                let dst = dst_row + x * bpp;
+                self.bytes[dst..dst + bpp].copy_from_slice(&[
+                    decoded.rgba[src + 2],
+                    decoded.rgba[src + 1],
+                    decoded.rgba[src],
+                    255,
+                ]);
+            }
+        }
+        Ok(())
+    }
+
+    fn require_initialized(&self) -> Result<(), Error> {
+        self.is_initialized()
+            .then_some(())
+            .ok_or(Error::CacheUninitialized)
+    }
+
+    fn require_dimensions(&self, width: u16, height: u16) -> Result<(), Error> {
+        if self.width == width && self.height == height {
+            Ok(())
+        } else {
+            Err(Error::ScreenDimensionsChanged {
+                old_width: self.width,
+                old_height: self.height,
+                new_width: width,
+                new_height: height,
+            })
+        }
+    }
+}
+
+struct DecodedPng {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+fn decode_png_rgba(png_bytes: &[u8]) -> Result<DecodedPng, Error> {
+    let decoder = png::Decoder::new(Cursor::new(png_bytes));
+    let mut reader = decoder.read_info()?;
+    let mut buf = vec![0; reader.output_buffer_size().unwrap_or_default()];
+    let info = reader.next_frame(&mut buf)?;
+    let bytes = &buf[..info.buffer_size()];
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => bytes.to_vec(),
+        other => return Err(Error::UnsupportedPngColor(other)),
+    };
+    Ok(DecodedPng {
+        width: info.width,
+        height: info.height,
+        rgba,
+    })
+}
+
+fn clip_cache_rect(width: u16, height: u16, rect: Rect) -> Rect {
+    let x0 = rect.x.min(width);
+    let y0 = rect.y.min(height);
+    let x1 = rect.x.saturating_add(rect.width).min(width);
+    let y1 = rect.y.saturating_add(rect.height).min(height);
+    Rect {
+        x: x0,
+        y: y0,
+        width: x1.saturating_sub(x0),
+        height: y1.saturating_sub(y0),
+    }
 }
 
 fn normalize_rects(width: u16, height: u16, dirty: &[XRectangle]) -> Vec<Rect> {
@@ -515,5 +723,126 @@ mod tests {
                 height: 45,
             }]
         );
+    }
+
+    #[test]
+    fn framebuffer_cache_applies_dirty_png_regions_only() {
+        let mut cache = FramebufferCache::new();
+        let keyframe = screen_update(
+            UpdateKind::Keyframe,
+            4,
+            3,
+            &[encoded_region(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 3,
+                },
+                [10, 20, 30, 255],
+            )],
+        );
+        cache.ingest(&keyframe).expect("keyframe initializes cache");
+
+        let delta_rect = Rect {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 1,
+        };
+        let delta = screen_update(
+            UpdateKind::Delta,
+            4,
+            3,
+            &[encoded_region(delta_rect, [200, 40, 10, 255])],
+        );
+        cache.ingest(&delta).expect("delta applies to cache");
+
+        let full = decode_png_rgba(&cache.render_full_png().expect("full render"))
+            .expect("rendered PNG decodes");
+        assert_eq!((full.width, full.height), (4, 3));
+        assert_eq!(rgba_pixel(&full.rgba, 4, 0, 0), [30, 20, 10, 255]);
+        assert_eq!(rgba_pixel(&full.rgba, 4, 1, 1), [10, 40, 200, 255]);
+        assert_eq!(rgba_pixel(&full.rgba, 4, 2, 1), [10, 40, 200, 255]);
+        assert_eq!(rgba_pixel(&full.rgba, 4, 3, 1), [30, 20, 10, 255]);
+
+        let crop = decode_png_rgba(&cache.render_crop_png(delta_rect).expect("crop render"))
+            .expect("crop PNG decodes");
+        assert_eq!((crop.width, crop.height), (2, 1));
+        assert_eq!(rgba_pixel(&crop.rgba, 2, 0, 0), [10, 40, 200, 255]);
+        assert_eq!(rgba_pixel(&crop.rgba, 2, 1, 0), [10, 40, 200, 255]);
+    }
+
+    #[test]
+    fn framebuffer_cache_rejects_delta_before_keyframe() {
+        let mut cache = FramebufferCache::new();
+        let delta = screen_update(
+            UpdateKind::Delta,
+            2,
+            2,
+            &[encoded_region(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                [0, 0, 0, 255],
+            )],
+        );
+
+        assert!(matches!(
+            cache.ingest(&delta),
+            Err(Error::CacheUninitialized)
+        ));
+    }
+
+    fn screen_update(
+        kind: UpdateKind,
+        width: u16,
+        height: u16,
+        regions: &[EncodedRegion],
+    ) -> ScreenUpdate {
+        ScreenUpdate {
+            kind,
+            width,
+            height,
+            dirty_area: regions.iter().map(|region| region.rect.area()).sum(),
+            rebaseline_reason: None,
+            regions: regions.to_vec(),
+        }
+    }
+
+    fn encoded_region(rect: Rect, bgra: [u8; 4]) -> EncodedRegion {
+        let mut bytes = Vec::new();
+        for _ in 0..rect.area() {
+            bytes.extend_from_slice(&bgra);
+        }
+        EncodedRegion {
+            rect,
+            png: encode_rect_png(
+                &bytes,
+                rect.width,
+                rect.height,
+                4,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: rect.width,
+                    height: rect.height,
+                },
+            )
+            .expect("test PNG encodes"),
+        }
+    }
+
+    fn rgba_pixel(rgba: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
+        let offset = (y * width + x) * 4;
+        [
+            rgba[offset],
+            rgba[offset + 1],
+            rgba[offset + 2],
+            rgba[offset + 3],
+        ]
     }
 }
