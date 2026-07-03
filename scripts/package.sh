@@ -18,7 +18,9 @@ FORMAT="${1:?usage: package.sh <format> <arch> <stage-subdir> [out-dir]}"
 PKG_ARCH="${2:?missing arch}"
 STAGE_SUB="${3:?missing stage-subdir}"
 
-ROOT_DIR="$(git rev-parse --show-toplevel)"
+# Repo root; falls back to cwd inside the CI assembly containers (no git,
+# and root-vs-runner ownership would trip git's dubious-ownership check).
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 OUT_DIR="${4:-$ROOT_DIR/dist/pkg}"
 : "${PKG_VERSION:?PKG_VERSION must be set (derive from git tag via the Makefile)}"
 

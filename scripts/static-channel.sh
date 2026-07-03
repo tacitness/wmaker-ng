@@ -18,7 +18,9 @@ set -euo pipefail
 
 TARBALL_DIR="${1:?usage: static-channel.sh <tarball-dir> <version> [out-dir]}"
 PKG_VERSION="${2:?missing version}"
-ROOT_DIR="$(git rev-parse --show-toplevel)"
+# Repo root; falls back to cwd inside the CI assembly containers (no git,
+# and root-vs-runner ownership would trip git's dubious-ownership check).
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 OUT_DIR="${3:-$ROOT_DIR/dist/static}"
 VERSION_DIR="$OUT_DIR/releases/$PKG_VERSION"
 
