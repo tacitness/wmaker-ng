@@ -121,6 +121,75 @@ ai-mcp
 - #51 Disposable-profile install/smoke test for Brave/Chromium in
   `wmaker-ai-browser`.
 
+## Native Messaging Bridge
+
+The #48 bridge lands as an `ai-mcp browser-host` subcommand so packaging only
+has to ship one executable. Browser stdio uses Chromium native messaging
+framing: four little-endian length bytes followed by a JSON document. The host
+validates the adapter payload and forwards it to the running `ai-mcp` server
+over newline-delimited JSON on an owner-only Unix socket.
+
+Default socket:
+
+```text
+$XDG_RUNTIME_DIR/wmaker-ai/browser-adapter.sock
+```
+
+Override it with `WMAKER_AI_BROWSER_SOCKET` on both sides. Set
+`WMAKER_AI_BROWSER_SOCKET=0` only when starting `ai-mcp` without the browser
+adapter socket.
+
+Every forwarded message uses schema version `1`:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "browser.summary",
+  "extension_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "tab_id": 1,
+  "payload": {
+    "url": "https://example.com/",
+    "title": "Example Domain",
+    "controls": []
+  }
+}
+```
+
+The host requires an explicit extension allowlist. Use one of:
+
+```bash
+ai-mcp browser-host --allow-extension-id aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+WMAKER_AI_BROWSER_ALLOWED_EXTENSION_IDS=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ai-mcp browser-host
+```
+
+`--allow-any-extension` exists only for disposable smoke tests. It should not be
+used with a live browser profile.
+
+The manifest and wrapper templates live under
+`sandbox/browser/native-messaging/`:
+
+- `wmaker-ai-browser-host.sh.in`
+- `wmaker_ai_browser.json.in`
+
+Render `__AI_MCP_PATH__` in the wrapper to the installed `ai-mcp` executable,
+render `__EXTENSION_ID__` to the packed extension ID, make the wrapper
+executable, then render `__BROWSER_HOST_PATH__` in the manifest to that wrapper.
+Chrome/Chromium native messaging manifests cannot pass command arguments
+directly, so the wrapper execs `ai-mcp browser-host`.
+
+Chrome/Chromium search paths are:
+
+```text
+~/.config/google-chrome/NativeMessagingHosts/wmaker_ai_browser.json
+~/.config/chromium/NativeMessagingHosts/wmaker_ai_browser.json
+```
+
+Brave uses:
+
+```text
+~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/wmaker_ai_browser.json
+```
+
 ## References
 
 - BrowserMCP project: https://github.com/BrowserMCP/mcp

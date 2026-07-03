@@ -20,7 +20,7 @@ wmng-dbus = { path = "../wmng-dbus" }
 ai-proto = { path = "../ai-proto" }
 # MCP server runtime over stdio (transport choice tracked in PLAN §9).
 rmcp = { workspace = true, features = ["server", "macros", "transport-io", "schemars"] }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util", "net"] }
 serde.workspace = true
 schemars.workspace = true
 png.workspace = true
@@ -30,6 +30,6 @@ arboard.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true

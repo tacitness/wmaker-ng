@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+exec "__AI_MCP_PATH__" browser-host \
+  --allow-extension-id "__EXTENSION_ID__" \
+  "$@"

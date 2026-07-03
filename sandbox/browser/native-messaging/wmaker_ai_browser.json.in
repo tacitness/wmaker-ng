@@ -1,0 +1,9 @@
+{
+  "name": "wmaker_ai_browser",
+  "description": "wmaker-ai browser semantic adapter bridge",
+  "path": "__BROWSER_HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}
