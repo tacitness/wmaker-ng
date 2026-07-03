@@ -5,12 +5,14 @@
 //! to suspend. This crate is the shared zbus surface for those event-driven
 //! daemons; the Window Maker core remains untouched and out-of-process.
 
+mod atspi;
 mod error;
 mod login1;
 mod udisks2;
 mod upower;
 mod util;
 
+pub use atspi::{AccessibilityExtents, AccessibilityNode, AccessibilitySnapshot, AtSpi};
 pub use error::{Error, Result};
 pub use login1::{Login1, LoginState, LoginStateSnapshot, PrepareForSleepStream};
 pub use udisks2::{BlockDeviceSnapshot, UDisks2};
@@ -23,13 +25,24 @@ pub async fn system_connection() -> Result<zbus::Connection> {
     Ok(zbus::Connection::system().await?)
 }
 
+/// Open a connection to the user session bus.
+pub async fn session_connection() -> Result<zbus::Connection> {
+    Ok(zbus::Connection::session().await?)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::system_connection;
+    use super::{session_connection, system_connection};
 
     #[tokio::test]
     #[ignore = "requires a live system bus"]
     async fn system_bus_connection_smoke() {
         let _connection = system_connection().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a live user session bus"]
+    async fn session_bus_connection_smoke() {
+        let _connection = session_connection().await.unwrap();
     }
 }
