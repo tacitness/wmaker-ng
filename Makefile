@@ -29,7 +29,9 @@ _GIT_EXACT   := $(shell git describe --exact-match --tags HEAD 2>/dev/null)
 _GIT_TAG     := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
 _BASE_VER    := $(if $(_GIT_TAG),$(_GIT_TAG),0.0.0)
 # Exact tag → clean semver; otherwise a dev pre-release that sorts below it.
-export PKG_VERSION := $(if $(_GIT_EXACT),$(_BASE_VER),$(_BASE_VER)~dev.g$(COMMIT))
+# ?= so CI can inject the tag-derived version into containers where the git
+# metadata (shallow/tagless checkout, or no git at all) can't provide it.
+export PKG_VERSION ?= $(if $(_GIT_EXACT),$(_BASE_VER),$(_BASE_VER)~dev.g$(COMMIT))
 PKG_DIR  := $(ROOT_DIR)/packaging/nfpm
 DIST_DIR := $(ROOT_DIR)/dist
 
