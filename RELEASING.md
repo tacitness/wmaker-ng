@@ -44,7 +44,8 @@ revisit when distros roll.
    - **apt** — `reprepro`, signed `InRelease` + `Release.gpg` (GPG).
    - **rpm** — `rpm --addsign` packages + `createrepo_c` + signed `repomd.xml` (GPG).
    - **apk** — `APKINDEX` signed with `abuild-sign` (RSA) in an Alpine container.
-   - **publish** — `rsync` to `repos.tacitsoft.dev` under `/srv/repos/wmaker-ng/`.
+   - **publish** — `aws s3 sync` into the SDD-126 `repos.tacitsoft.dev`
+     S3+CloudFront bucket under `/wmaker-ng/` (gated on `REPOS_BUCKET`).
    - **static** — `.tar.zst`, `manifest.json`, `latest`, and `install.sh` under
      `/static`.
    - **AUR** — optionally render `wmaker-ng-bin` / `wmaker-ai-bin` from the
@@ -57,15 +58,20 @@ revisit when distros roll.
 No signing keys live as GitHub Actions secrets. The `release` job assumes an AWS
 role via **OIDC** and pulls keys from **Secrets Manager** at release time — one
 rotatable source of truth, consistent with dagobah-infra (ESO → Secrets
-Manager). Signing + publish **gate on the `AWS_ROLE_ARN` repo variable**: until
-it is set, the pipeline still builds, packages, assembles *unsigned* repos, and
-cuts the GitHub Release; it hardens automatically once infra wires the role.
+Manager). Signing **gates on the `AWS_ROLE_ARN` repo variable**; repo
+publishing additionally gates on **`REPOS_BUCKET`** (the S3 bucket behind
+`repos.tacitsoft.dev`, provisioned by dagobah-infra `public-dist`). Until they
+are set, the pipeline still builds, packages, assembles *unsigned* repos, and
+cuts the GitHub Release; each lane hardens automatically once infra wires its
+variable. Public key halves (GPG + apk RSA) are exported into the repo tree
+under `/keys/` at release time.
 
-**Repo variable** (GitHub → Settings → Variables): `AWS_ROLE_ARN` = the OIDC
-role to assume (`us-west-2`). Optional overrides: `SM_GPG_KEY`, `SM_APK_KEY`,
-`SM_DEPLOY_KEY`, `SM_AUR_KEY` if the Secrets Manager paths differ from the
-defaults below. Set `AUR_PUBLISH=true` only after the AUR package remotes and
-deploy key are provisioned.
+**Repo variables** (GitHub → Settings → Variables): `AWS_ROLE_ARN` = the OIDC
+role to assume (`us-west-2`); `REPOS_BUCKET` = the repos S3 bucket (activates
+publishing). Optional overrides: `SM_GPG_KEY`, `SM_APK_KEY`, `SM_AUR_KEY` if
+the Secrets Manager paths differ from the defaults below. Set
+`AUR_PUBLISH=true` only after the AUR package remotes and deploy key are
+provisioned.
 
 **Secrets Manager entries** (`us-west-2`, ops to provision):
 
@@ -73,8 +79,10 @@ deploy key are provisioned.
 |----------------------------------------------|-----------------------------------------------------|
 | `/tacitsoft/wmaker-ng/gpg-signing-key`       | Armored GPG **private** key — signs apt + rpm (key id derived on import) |
 | `/tacitsoft/wmaker-ng/apk-signing-key`       | abuild **RSA** private key — signs the apk `APKINDEX` |
-| `/tacitsoft/wmaker-ng/repos-deploy-ssh-key`  | SSH private key for `deploy@repos.tacitsoft.dev`    |
 | `/tacitsoft/wmaker-ng/aur-deploy-ssh-key`    | SSH private key for `aur@aur.archlinux.org` package remotes |
+
+Publishing needs no deploy key: the same OIDC role gets `s3:PutObject`/
+`s3:DeleteObject`/`s3:ListBucket` on the repos bucket (dagobah-infra#252).
 
 > apt/rpm use **GPG**; apk uses a **separate RSA** key. The OIDC role's trust
 > policy must include `repo:tacitness/wmaker-ng:*` and its IAM policy must grant

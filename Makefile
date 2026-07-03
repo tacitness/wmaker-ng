@@ -169,7 +169,7 @@ repo-apk: ## Assemble (and sign) the APK repo → dist/repo/apk (Alpine only)
 repos: repo-apt repo-rpm repo-apk ## Assemble all repositories
 
 .PHONY: publish
-publish: ## rsync the assembled repos → repos.tacitsoft.dev (needs deploy key)
+publish: ## s3-sync the assembled repos → repos.tacitsoft.dev (needs REPOS_BUCKET)
 	scripts/publish.sh $(DIST_DIR)/repo
 
 .PHONY: release-local
