@@ -12,6 +12,8 @@ name: wmaker-ng
 arch: ${PKG_ARCH}
 platform: linux
 version: ${PKG_VERSION}
+# rpm dist tag (1.el8 / 1.el9) — empty for deb/apk (see package.sh).
+release: ${PKG_RELEASE}
 section: x11
 priority: optional
 maintainer: The wmaker-ng Team <ops@tacitsoft.dev>
@@ -33,10 +35,16 @@ recommends:
 contents:
   - src: ${WMNG_STAGE}/ng-automount
     dst: /usr/bin/ng-automount
+    file_info:
+      mode: 0755
   - src: ${WMNG_STAGE}/ng-power
     dst: /usr/bin/ng-power
+    file_info:
+      mode: 0755
   - src: ${WMNG_STAGE}/ng-notify
     dst: /usr/bin/ng-notify
+    file_info:
+      mode: 0755
 
 # Signing is applied at the repo-assembly layer, not here (see scripts/repo.sh):
 #   apt  — GPG-signed InRelease + Release.gpg

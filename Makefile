@@ -124,28 +124,39 @@ setup: install-dev-tools hooks ## Bootstrap local dev tools + git hooks
 # EL9/EL10, Fedora, Debian 12/13, Ubuntu 22.04/24.04. musl binaries are static
 # (Alpine + anywhere). Two libc × two arch = four binary sets.
 GNU_FLOOR := 2.34
+# EL8/Rocky 8 lane: glibc 2.28 floor (#68). rpm-only — deb/apk stay on the
+# floors above; tarballs ship the 2.34 + musl lanes.
+GNU_FLOOR_EL8 := 2.28
 
 .PHONY: build-amd64-gnu build-arm64-gnu build-amd64-musl build-arm64-musl cross-build
+.PHONY: build-amd64-el8 build-arm64-el8
 build-amd64-gnu:  ## Cross-build glibc/x86_64 binaries (EL9 floor)
 	scripts/build.sh x86_64-unknown-linux-gnu.$(GNU_FLOOR)  amd64-gnu
 build-arm64-gnu:  ## Cross-build glibc/aarch64 binaries (EL9 floor)
 	scripts/build.sh aarch64-unknown-linux-gnu.$(GNU_FLOOR) arm64-gnu
+build-amd64-el8:  ## Cross-build glibc/x86_64 binaries (EL8 floor, rpm lane)
+	scripts/build.sh x86_64-unknown-linux-gnu.$(GNU_FLOOR_EL8)  amd64-el8
+build-arm64-el8:  ## Cross-build glibc/aarch64 binaries (EL8 floor, rpm lane)
+	scripts/build.sh aarch64-unknown-linux-gnu.$(GNU_FLOOR_EL8) arm64-el8
 build-amd64-musl: ## Cross-build musl-static/x86_64 binaries
 	scripts/build.sh x86_64-unknown-linux-musl  amd64-musl
 build-arm64-musl: ## Cross-build musl-static/aarch64 binaries
 	scripts/build.sh aarch64-unknown-linux-musl arm64-musl
-cross-build: build-amd64-gnu build-arm64-gnu build-amd64-musl build-arm64-musl ## Build the full matrix
+cross-build: build-amd64-gnu build-arm64-gnu build-amd64-el8 build-arm64-el8 build-amd64-musl build-arm64-musl ## Build the full matrix
 
 # ── Packaging (nfpm → deb/rpm/apk) ────────────────────────────────────────────
 # deb/rpm come from the glibc stage; apk from the musl stage.
 .PHONY: packages
-packages: ## Build deb+rpm (glibc) and apk (musl) for both arches → dist/pkg
+packages: ## Build deb+rpm(el8/el9)+apk for both arches → dist/pkg
 	scripts/package.sh deb amd64 amd64-gnu
-	scripts/package.sh rpm amd64 amd64-gnu
 	scripts/package.sh deb arm64 arm64-gnu
-	scripts/package.sh rpm arm64 arm64-gnu
+	PKG_DIST=el9 scripts/package.sh rpm amd64 amd64-gnu
+	PKG_DIST=el9 scripts/package.sh rpm arm64 arm64-gnu
+	PKG_DIST=el8 scripts/package.sh rpm amd64 amd64-el8
+	PKG_DIST=el8 scripts/package.sh rpm arm64 arm64-el8
 	scripts/package.sh apk amd64 amd64-musl
 	scripts/package.sh apk arm64 arm64-musl
+	scripts/check-pkg-modes.sh $(DIST_DIR)/pkg
 
 .PHONY: tarballs
 tarballs: ## Package staged binaries into portable tarballs → dist/tarballs
@@ -164,8 +175,10 @@ static-channel: tarballs ## Build the static .tar.zst channel → dist/static
 .PHONY: repo-apt repo-rpm repo-apk repos
 repo-apt: ## Assemble (and sign) the APT repo → dist/repo/apt
 	scripts/repo-apt.sh $(DIST_DIR)/repo/apt $(DIST_DIR)/pkg
-repo-rpm: ## Assemble (and sign) the RPM repo → dist/repo/rpm
-	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm $(DIST_DIR)/pkg
+repo-rpm: ## Assemble (and sign) the RPM repos per ABI floor → dist/repo/rpm/el{8,9}
+	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el8 $(DIST_DIR)/pkg '*.el8.*.rpm'
+	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el9 $(DIST_DIR)/pkg '*.el9.*.rpm'
+	cp -f packaging/repo/wmaker-ng.repo $(DIST_DIR)/repo/rpm/
 repo-apk: ## Assemble (and sign) the APK repo → dist/repo/apk (Alpine only)
 	scripts/repo-apk.sh $(DIST_DIR)/repo/apk $(DIST_DIR)/pkg
 repos: repo-apt repo-rpm repo-apk ## Assemble all repositories
