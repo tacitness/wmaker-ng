@@ -187,7 +187,7 @@ struct WindowList {
     windows: Vec<WindowOut>,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 struct RectOut {
     x: i32,
     y: i32,
@@ -236,6 +236,45 @@ struct DesktopSceneOut {
     focus: FocusOut,
     stacking_order: Vec<u32>,
     windows: Vec<SceneWindowOut>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ObservationOut {
+    preferred_model_lane: bool,
+    summary: String,
+    focused_window: Option<ObservationWindowOut>,
+    actionable_windows: Vec<ObservationWindowOut>,
+    recent_changes: RecentChangesOut,
+    semantic_adapters: Vec<String>,
+    pixel_fallbacks: PixelFallbacksOut,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+struct ObservationWindowOut {
+    handle: u32,
+    title: String,
+    app: Option<String>,
+    geometry: RectOut,
+    workspace: Option<u32>,
+    active: bool,
+    actions: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct RecentChangesOut {
+    available: bool,
+    dirty_rect_count: usize,
+    dirty_area: u32,
+    rects: Vec<RectOut>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct PixelFallbacksOut {
+    embedded_pixels: bool,
+    full_screenshot_tool: String,
+    dirty_png_delta_tool: String,
+    fast_delta_tool: String,
+    local_crop_reference: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -496,6 +535,97 @@ impl WmCtl {
                 },
                 stacking_order,
                 windows,
+            }))
+        })
+        .await
+    }
+
+    #[tool(
+        description = "Preferred model-facing observation lane: compact text/JSON desktop state with focus, actionable windows, and damage metadata; embeds no screenshot pixels."
+    )]
+    async fn observe(&self) -> Result<Json<ObservationOut>, ErrorData> {
+        let x = self.x.clone();
+        let damage = self.damage.clone();
+        run(move || {
+            let ewmh = Ewmh::new(&x).map_err(to_err)?;
+            let active = ewmh.active_window().map_err(to_err)?;
+            let pointer = x.pointer().map_err(to_err)?;
+            let dirty = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
+            let dirty_area = dirty.iter().fold(0u32, |total, rect| {
+                total.saturating_add(u32::from(rect.width) * u32::from(rect.height))
+            });
+            let mut windows = ewmh
+                .list_windows()
+                .map_err(to_err)?
+                .into_iter()
+                .filter(|w| w.mapped && !w.minimized)
+                .map(|w| ObservationWindowOut {
+                    handle: w.id,
+                    title: w.title,
+                    app: w.class.or(w.instance),
+                    geometry: RectOut {
+                        x: w.x.into(),
+                        y: w.y.into(),
+                        width: w.width.into(),
+                        height: w.height.into(),
+                    },
+                    workspace: w.workspace,
+                    active: active.is_some_and(|id| id == w.id),
+                    actions: vec![
+                        "focus".to_string(),
+                        "move_resize".to_string(),
+                        "close_window".to_string(),
+                    ],
+                })
+                .collect::<Vec<_>>();
+            windows.sort_by_key(|w| (!w.active, w.handle));
+            let focused_window = windows.iter().find(|w| w.active).cloned();
+            let pointer_summary = pointer
+                .child
+                .map(|id| format!(" pointer over 0x{id:x}."))
+                .unwrap_or_default();
+            let summary = match &focused_window {
+                Some(w) if w.title.is_empty() => {
+                    format!("Focused window 0x{:x}.{}", w.handle, pointer_summary)
+                }
+                Some(w) => format!(
+                    "Focused window 0x{:x}: {}.{}",
+                    w.handle, w.title, pointer_summary
+                ),
+                None => format!(
+                    "No active window. {} visible/actionable windows.{}",
+                    windows.len(),
+                    pointer_summary
+                ),
+            };
+            Ok(Json(ObservationOut {
+                preferred_model_lane: true,
+                summary,
+                focused_window,
+                actionable_windows: windows,
+                recent_changes: RecentChangesOut {
+                    available: true,
+                    dirty_rect_count: dirty.len(),
+                    dirty_area,
+                    rects: dirty
+                        .into_iter()
+                        .map(|r| RectOut {
+                            x: r.x.into(),
+                            y: r.y.into(),
+                            width: r.width.into(),
+                            height: r.height.into(),
+                        })
+                        .collect(),
+                },
+                semantic_adapters: Vec::new(),
+                pixel_fallbacks: PixelFallbacksOut {
+                    embedded_pixels: false,
+                    full_screenshot_tool: "screenshot".to_string(),
+                    dirty_png_delta_tool: "changed_regions".to_string(),
+                    fast_delta_tool: "changed_regions_fast".to_string(),
+                    local_crop_reference:
+                        "future framebuffer crop tools; no pixels embedded by observe".to_string(),
+                },
             }))
         })
         .await
@@ -1081,5 +1211,53 @@ mod tests {
         assert_eq!(json["windows"][0]["class"], "Firefox");
         assert_eq!(json["windows"][0]["geometry"]["x"], 100);
         assert_eq!(json["windows"][0]["capabilities"]["xtest_input"], true);
+    }
+
+    #[test]
+    fn observation_serializes_text_first_contract() {
+        let observation = ObservationOut {
+            preferred_model_lane: true,
+            summary: "Focused window 0x2a: Example.".to_string(),
+            focused_window: Some(ObservationWindowOut {
+                handle: 42,
+                title: "Example".to_string(),
+                app: Some("Firefox".to_string()),
+                geometry: RectOut {
+                    x: 100,
+                    y: 80,
+                    width: 800,
+                    height: 600,
+                },
+                workspace: Some(0),
+                active: true,
+                actions: vec!["focus".to_string(), "move_resize".to_string()],
+            }),
+            actionable_windows: Vec::new(),
+            recent_changes: RecentChangesOut {
+                available: true,
+                dirty_rect_count: 1,
+                dirty_area: 400,
+                rects: vec![RectOut {
+                    x: 10,
+                    y: 20,
+                    width: 20,
+                    height: 20,
+                }],
+            },
+            semantic_adapters: Vec::new(),
+            pixel_fallbacks: PixelFallbacksOut {
+                embedded_pixels: false,
+                full_screenshot_tool: "screenshot".to_string(),
+                dirty_png_delta_tool: "changed_regions".to_string(),
+                fast_delta_tool: "changed_regions_fast".to_string(),
+                local_crop_reference: "framebuffer crop".to_string(),
+            },
+        };
+
+        let json = serde_json::to_value(&observation).expect("observation serializes");
+        assert_eq!(json["preferred_model_lane"], true);
+        assert_eq!(json["focused_window"]["handle"], 42);
+        assert_eq!(json["pixel_fallbacks"]["embedded_pixels"], false);
+        assert!(json["pixel_fallbacks"]["full_screenshot_tool"].is_string());
     }
 }

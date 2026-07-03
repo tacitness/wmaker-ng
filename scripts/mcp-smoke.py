@@ -33,6 +33,7 @@ REQUIRED_TOOLS = {
     "minimize",
     "move_mouse",
     "move_resize",
+    "observe",
     "pointer",
     "scroll",
     "screenshot",
@@ -278,6 +279,15 @@ def main():
             raise RuntimeError("desktop_scene returned malformed payload: {}".format(scene))
         if not any(item.get("id") == window_id for item in scene.get("windows", [])):
             raise RuntimeError("desktop_scene did not include smoke window: {}".format(scene))
+        observation = text_json(call_tool(mcp, "observe"))
+        if observation.get("pixel_fallbacks", {}).get("embedded_pixels") is not False:
+            raise RuntimeError("observe embedded pixels unexpectedly: {}".format(observation))
+        observed_window = next(
+            (item for item in observation.get("actionable_windows", []) if item.get("handle") == window_id),
+            None,
+        )
+        if not observed_window:
+            raise RuntimeError("observe did not include smoke window: {}".format(observation))
 
         call_tool(mcp, "focus", {"window": window_id})
         call_tool(mcp, "key_combo", {"keys": ["ctrl", "l"]})
