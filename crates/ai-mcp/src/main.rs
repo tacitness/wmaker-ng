@@ -210,7 +210,7 @@ struct WindowList {
     windows: Vec<WindowOut>,
 }
 
-#[derive(Clone, Serialize, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 struct RectOut {
     x: i32,
     y: i32,
@@ -270,6 +270,7 @@ struct ObservationOut {
     outputs: Vec<MonitorOut>,
     focused_window: Option<ObservationWindowOut>,
     actionable_windows: Vec<ObservationWindowOut>,
+    browser: BrowserObservationOut,
     recent_changes: RecentChangesOut,
     semantic_adapters: Vec<String>,
     vision_fallback_policy: VisionFallbackPolicyOut,
@@ -320,6 +321,33 @@ struct PixelFallbacksOut {
     dirty_png_delta_tool: String,
     fast_delta_tool: String,
     local_crop_reference: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+struct BrowserObservationOut {
+    connected: bool,
+    adapter: Option<String>,
+    extension_id: Option<String>,
+    tab_id: Option<i64>,
+    url: Option<String>,
+    title: Option<String>,
+    controls: Vec<BrowserControlOut>,
+}
+
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+struct BrowserControlOut {
+    handle: String,
+    role: String,
+    label: String,
+    enabled: bool,
+    bounds: RectOut,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    checked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected: Option<bool>,
+    redacted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_type: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -729,18 +757,23 @@ impl WmCtl {
                     pointer_summary
                 ),
             };
-            let semantic_adapters = browser_adapter_latest
-                .as_ref()
-                .map(|message| {
-                    let suffix = message
-                        .extension_id
-                        .as_deref()
-                        .map(|id| format!(" from extension {id}"))
-                        .unwrap_or_default();
-                    summary.push_str(&format!(" Browser semantic adapter connected{suffix}."));
-                    vec!["browser_native_messaging".to_string()]
-                })
-                .unwrap_or_default();
+            let browser = browser_observation_from_latest(browser_adapter_latest.as_ref());
+            let semantic_adapters = if browser.connected {
+                browser_adapter_latest
+                    .as_ref()
+                    .map(|message| {
+                        let suffix = message
+                            .extension_id
+                            .as_deref()
+                            .map(|id| format!(" from extension {id}"))
+                            .unwrap_or_default();
+                        summary.push_str(&format!(" Browser semantic adapter connected{suffix}."));
+                        vec!["browser_native_messaging".to_string()]
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let vision_fallback_policy =
                 vision_fallback_policy_for(active, pointer.child, &windows);
             Ok(Json(ObservationOut {
@@ -749,6 +782,7 @@ impl WmCtl {
                 outputs,
                 focused_window,
                 actionable_windows: windows,
+                browser,
                 recent_changes: RecentChangesOut {
                     available: true,
                     dirty_rect_count: dirty.len(),
@@ -1496,6 +1530,48 @@ fn handle_browser_adapter_message(
     }
 }
 
+fn browser_observation_from_latest(
+    latest: Option<&BrowserAdapterMessage>,
+) -> BrowserObservationOut {
+    let Some(message) = latest else {
+        return BrowserObservationOut {
+            connected: false,
+            adapter: None,
+            extension_id: None,
+            tab_id: None,
+            url: None,
+            title: None,
+            controls: Vec::new(),
+        };
+    };
+
+    let payload = serde_json::from_value::<BrowserSummaryPayload>(message.payload.clone()).ok();
+    BrowserObservationOut {
+        connected: true,
+        adapter: Some("browser_native_messaging".to_string()),
+        extension_id: message.extension_id.clone(),
+        tab_id: message.tab_id,
+        url: payload.as_ref().and_then(|payload| payload.url.clone()),
+        title: payload.as_ref().and_then(|payload| payload.title.clone()),
+        controls: payload
+            .map(|payload| payload.controls)
+            .unwrap_or_default()
+            .into_iter()
+            .take(128)
+            .collect(),
+    }
+}
+
+#[derive(Deserialize)]
+struct BrowserSummaryPayload {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    controls: Vec<BrowserControlOut>,
+}
+
 fn browser_socket_path() -> PathBuf {
     std::env::var_os("WMAKER_AI_BROWSER_SOCKET")
         .map(PathBuf::from)
@@ -1910,6 +1986,7 @@ mod tests {
             outputs,
             focused_window: Some(focused.clone()),
             actionable_windows: Vec::new(),
+            browser: browser_observation_from_latest(None),
             recent_changes: RecentChangesOut {
                 available: true,
                 dirty_rect_count: 1,
@@ -1937,6 +2014,13 @@ mod tests {
         assert_eq!(json["focused_window"]["handle"], 42);
         assert_eq!(json["outputs"][0]["name"], "HDMI-1");
         assert_eq!(json["focused_window"]["output"]["name"], "HDMI-1");
+        assert_eq!(json["browser"]["connected"], false);
+        assert!(
+            json["browser"]["controls"]
+                .as_array()
+                .expect("controls")
+                .is_empty()
+        );
         assert_eq!(json["pixel_fallbacks"]["embedded_pixels"], false);
         assert_eq!(json["vision_fallback_policy"]["pixels_required"], false);
         assert_eq!(json["vision_fallback_policy"]["crop_target"]["handle"], 42);
@@ -2045,6 +2129,43 @@ mod tests {
                 .as_ref()
                 .is_some_and(|latest| latest.kind == "browser.summary")
         );
+    }
+
+    #[test]
+    fn browser_observation_projects_adapter_summary_without_pixels() {
+        let message = BrowserAdapterMessage {
+            schema_version: BROWSER_ADAPTER_SCHEMA_VERSION,
+            kind: "browser.summary".to_string(),
+            extension_id: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
+            tab_id: Some(12),
+            payload: serde_json::json!({
+                "url": "https://example.com/",
+                "title": "Example Domain",
+                "controls": [
+                    {
+                        "handle": "dom:abc123",
+                        "role": "button",
+                        "label": "Continue",
+                        "enabled": true,
+                        "bounds": {"x": 10, "y": 20, "width": 100, "height": 30},
+                        "redacted": false
+                    }
+                ]
+            }),
+        };
+
+        let observation = browser_observation_from_latest(Some(&message));
+        let json = serde_json::to_value(observation).expect("browser observation serializes");
+
+        assert_eq!(json["connected"], true);
+        assert_eq!(json["adapter"], "browser_native_messaging");
+        assert_eq!(json["extension_id"], "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(json["tab_id"], 12);
+        assert_eq!(json["url"], "https://example.com/");
+        assert_eq!(json["title"], "Example Domain");
+        assert_eq!(json["controls"][0]["handle"], "dom:abc123");
+        assert_eq!(json["controls"][0]["bounds"]["width"], 100);
+        assert!(json.get("pixels").is_none());
     }
 
     #[test]
