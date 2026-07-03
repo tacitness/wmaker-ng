@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "wmaker-ai Browser Adapter",
+  "version": "0.1.0",
+  "description": "Reports visible DOM and ARIA controls to the wmaker-ai native adapter.",
+  "permissions": ["activeTab", "nativeMessaging", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dom-controls.js", "content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
