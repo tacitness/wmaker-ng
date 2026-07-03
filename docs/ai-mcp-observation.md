@@ -6,6 +6,7 @@ text/JSON desktop state without embedding screenshot pixels:
 - focused window summary
 - visible actionable window handles
 - geometry, workspace, app identity, and available window actions
+- monitor/output metadata and output-local window geometry
 - recent XDamage rectangle metadata when available
 - explicit vision fallback policy and crop-target metadata
 - references to opt-in pixel tools
