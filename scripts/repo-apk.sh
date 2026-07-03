@@ -31,8 +31,19 @@ apks=("$PKG_DIR"/*.apk)
 	exit 1
 }
 
-# nfpm names apk files <pkg>_<ver>_<arch>.apk (arch: x86_64 | aarch64).
-arches="$(for f in "${apks[@]}"; do b="${f%.apk}"; echo "${b##*_}"; done | sort -u)"
+# nfpm names apk files <pkg>_<ver>_<arch>.apk (arch: x86_64 | aarch64). Both
+# the version (e.g. 0.1.0_rc.4) and x86_64 contain underscores, so match the
+# known arch suffixes instead of splitting on '_'.
+arches="$(for f in "${apks[@]}"; do
+	case "$f" in
+	*_x86_64.apk) echo x86_64 ;;
+	*_aarch64.apk) echo aarch64 ;;
+	*)
+		echo "error: cannot determine arch of $f" >&2
+		exit 1
+		;;
+	esac
+done | sort -u)"
 
 for arch in $arches; do
 	dest="$REPO_DIR/$arch"
@@ -41,7 +52,9 @@ for arch in $arches; do
 	echo "==> apk index ($arch)" >&2
 	(
 		cd "$dest"
-		apk index --rewrite-arch "$arch" -o APKINDEX.tar.gz ./*.apk
+		# --allow-untrusted: the .apk files are unsigned by design; the trust
+		# anchor is the abuild-signed APKINDEX below.
+		apk index --allow-untrusted --rewrite-arch "$arch" -o APKINDEX.tar.gz ./*.apk
 		if [[ -n "$ABUILD_KEY" ]]; then
 			abuild-sign -k "$ABUILD_KEY" APKINDEX.tar.gz
 			cp -f "${ABUILD_KEY}.pub" "$REPO_DIR/" 2>/dev/null || true
