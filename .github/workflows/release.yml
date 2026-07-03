@@ -70,9 +70,27 @@ jobs:
           pattern: dist-*
           path: dist/
           merge-multiple: true
-      - uses: taiki-e/install-action@81ee1d48d9194cdcab880cbdc7d36e87d39874cb # v2.62.45
-        with:
-          tool: nfpm
+      - name: Install nfpm
+        # nfpm is a Go binary from goreleaser's GitHub releases, not a crate —
+        # taiki-e/install-action dropped it (falls back to cargo-binstall, which
+        # can't resolve it). Pin the version + verify the checksum directly.
+        env:
+          NFPM_VERSION: "2.47.0"
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64)  arch=x86_64; sha=0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783 ;;
+            aarch64) arch=arm64;  sha=1c0f5f2999b9a974bfb04fdb0cc3306096de530ac5dbb25d739cc5f5219c919c ;;
+            *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+          esac
+          tgz="nfpm_${NFPM_VERSION}_Linux_${arch}.tar.gz"
+          curl -fsSL -o "$tgz" \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/${tgz}"
+          echo "${sha}  ${tgz}" | sha256sum -c -
+          tar -xzf "$tgz" nfpm
+          sudo install -m 0755 nfpm /usr/local/bin/nfpm
+          rm -f "$tgz" nfpm
+          nfpm --version
       - name: Install envsubst
         run: sudo apt-get update && sudo apt-get install -y gettext-base
       - name: Derive version from tag
