@@ -31,14 +31,17 @@ rpms=("$PKG_DIR"/*.rpm)
 	echo "error: no .rpm files in $PKG_DIR" >&2
 	exit 1
 }
-cp -f "${rpms[@]}" "$REPO_DIR/"
-
+# Sign the source rpms in place *before* copying, so every downstream
+# consumer (GitHub Release assets and the yum repo alike) gets the same
+# GPG-signed packages — not just the repo copies.
 if [[ -n "$GPG_KEY_ID" ]]; then
 	echo "==> signing rpm packages with $GPG_KEY_ID" >&2
 	rpm --define "_gpg_name $GPG_KEY_ID" \
 		--define "_gpg_sign_cmd_extra_args --pinentry-mode loopback" \
-		--addsign "$REPO_DIR"/*.rpm
+		--addsign "${rpms[@]}"
 fi
+
+cp -f "${rpms[@]}" "$REPO_DIR/"
 
 echo "==> createrepo_c $REPO_DIR" >&2
 createrepo_c --update "$REPO_DIR"
