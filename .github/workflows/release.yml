@@ -82,7 +82,9 @@ jobs:
           NFPM_VERSION: "2.47.0"
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/w" -w /w \
+          # --network host: the dind daemon runs with --iptables=false, so
+          # bridge-networked containers have no egress/DNS; host = pod netns.
+          docker run --rm --network host -v "$PWD:/w" -w /w \
             -e PKG_VERSION -e NFPM_VERSION \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             debian:trixie-slim bash -c '
@@ -180,7 +182,8 @@ jobs:
         # assembly in a container (dind), like the apk stage below.
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/w" -w /w \
+          # --network host: see packaging job — dind runs --iptables=false.
+          docker run --rm --network host -v "$PWD:/w" -w /w \
             -e PKG_VERSION -e GPG_KEY_ID \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             debian:trixie-slim bash -c '
@@ -200,7 +203,7 @@ jobs:
         run: |
           keyenv=""
           [ -n "${ABUILD_KEY:-}" ] && keyenv="-e ABUILD_KEY=/w/dist/.keys/wmaker-ng.rsa"
-          docker run --rm -v "$PWD:/w" -w /w $keyenv \
+          docker run --rm --network host -v "$PWD:/w" -w /w $keyenv \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             alpine:3.22 sh -c \
             'apk add --no-cache bash abuild >/dev/null \
