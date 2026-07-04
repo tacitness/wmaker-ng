@@ -1,0 +1,10 @@
+# wmaker-ng yum/dnf repository — one config serves EL8/EL9/EL10 via
+# $releasever (el8 tree = glibc 2.28 floor; el9 tree = 2.34 floor, also
+# serves EL10/Fedora). Drop into /etc/yum.repos.d/wmaker-ng.repo.
+[wmaker-ng]
+name=wmaker-ng — Window Maker Next Generation
+baseurl=https://repos.tacitsoft.dev/wmaker-ng/rpm/el$releasever/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://repos.tacitsoft.dev/wmaker-ng/keys/wmaker-ng-release.gpg.asc

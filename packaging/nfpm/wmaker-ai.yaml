@@ -6,6 +6,8 @@ name: wmaker-ai
 arch: ${PKG_ARCH}
 platform: linux
 version: ${PKG_VERSION}
+# rpm dist tag (1.el8 / 1.el9) — empty for deb/apk (see package.sh).
+release: ${PKG_RELEASE}
 section: x11
 priority: optional
 maintainer: The wmaker-ng Team <ops@tacitsoft.dev>
@@ -24,6 +26,8 @@ depends:
 contents:
   - src: ${WMNG_STAGE}/ai-mcp
     dst: /usr/bin/ai-mcp
+    file_info:
+      mode: 0755
 
 # Signing is applied at the repo-assembly layer (see scripts/repo.sh), so the
 # recipe is identical for local (unsigned) and release (signed) runs.

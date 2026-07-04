@@ -15,8 +15,11 @@
 # ============================================================================
 set -euo pipefail
 
-REPO_DIR="${1:?usage: repo-rpm.sh <repo-dir> <pkg-dir>}"
-PKG_DIR="${2:?usage: repo-rpm.sh <repo-dir> <pkg-dir>}"
+REPO_DIR="${1:?usage: repo-rpm.sh <repo-dir> <pkg-dir> [glob]}"
+PKG_DIR="${2:?usage: repo-rpm.sh <repo-dir> <pkg-dir> [glob]}"
+# Optional filename glob so ABI floors assemble into separate trees
+# (e.g. '*.el8.*.rpm' → rpm/el8, '*.el9.*.rpm' → rpm/el9).
+RPM_GLOB="${3:-*.rpm}"
 GPG_KEY_ID="${GPG_KEY_ID:-}"
 
 command -v createrepo_c >/dev/null 2>&1 || {
@@ -26,9 +29,9 @@ command -v createrepo_c >/dev/null 2>&1 || {
 
 mkdir -p "$REPO_DIR"
 shopt -s nullglob
-rpms=("$PKG_DIR"/*.rpm)
+rpms=("$PKG_DIR"/$RPM_GLOB)
 [[ ${#rpms[@]} -gt 0 ]] || {
-	echo "error: no .rpm files in $PKG_DIR" >&2
+	echo "error: no rpms matching $RPM_GLOB in $PKG_DIR" >&2
 	exit 1
 }
 # Sign the source rpms in place *before* copying, so every downstream

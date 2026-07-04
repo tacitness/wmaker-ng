@@ -8,6 +8,7 @@
 #   stage:  dist/bin/<stage-subdir> holding the compiled binaries
 #
 # Env: PKG_VERSION (required) — semver from the git tag, set by the Makefile.
+#      PKG_DIST  (rpm only)  — ABI-floor dist tag (el8 | el9) → Release 1.<dist>.
 #
 # nfpm's env expansion is unreliable for `contents.src`, so we render the recipe
 # with envsubst first (only our three known vars), then package.
@@ -24,7 +25,14 @@ ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 OUT_DIR="${4:-$ROOT_DIR/dist/pkg}"
 : "${PKG_VERSION:?PKG_VERSION must be set (derive from git tag via the Makefile)}"
 
-export PKG_ARCH PKG_VERSION
+# rpm gets a dist-tagged Release (1.el8 / 1.el9 via PKG_DIST); deb/apk get
+# none so their artifact names stay bare (nfpm treats empty as unset).
+PKG_RELEASE=""
+if [[ "$FORMAT" == rpm ]]; then
+	PKG_RELEASE="1${PKG_DIST:+.$PKG_DIST}"
+fi
+
+export PKG_ARCH PKG_VERSION PKG_RELEASE
 export WMNG_STAGE="$ROOT_DIR/dist/bin/$STAGE_SUB"
 
 [[ -d "$WMNG_STAGE" ]] || {
@@ -45,7 +53,7 @@ for pkg in wmaker-ng wmaker-ai; do
 	rendered="$render_dir/$pkg.yaml"
 	# Single-quoted arg is intentional: envsubst takes a literal var list.
 	# shellcheck disable=SC2016
-	envsubst '${PKG_VERSION} ${PKG_ARCH} ${WMNG_STAGE}' \
+	envsubst '${PKG_VERSION} ${PKG_ARCH} ${PKG_RELEASE} ${WMNG_STAGE}' \
 		<"$ROOT_DIR/packaging/nfpm/$pkg.yaml" >"$rendered"
 	echo "==> nfpm $FORMAT: $pkg $PKG_VERSION ($PKG_ARCH)" >&2
 	nfpm package --config "$rendered" --packager "$FORMAT" --target "$OUT_DIR/"
