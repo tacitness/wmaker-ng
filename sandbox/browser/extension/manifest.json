@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "wmaker-ai Browser Adapter",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuX0gCBa6jx8+Lvi9XW0qcXwE+PZwevF+rxsxssZdV6OXYJ4Up0kHyZL4pf0xhEFt6DT85zxP+Xgu12oA+Z0ON6x/1qk5SsIEfdhZY9FGQHA/eJPd8qt3HHD4TUm9PPZB+3Jmd7e92J+nxeoW430sJHUb++yy23YagQJt3xafbzy9zqGeObZm+j/NSAgc6gu7KwgywzNFk1pOoi6cbqO7L7Ho6HlJkn51lviYngttlHBXITfpupbJ/2OkhHYQyh6Ljds4/Mk0ab3VSGGh+jnJc+al6FFba6GOUoWxhza6OdXd0SrR2MrxF/WAGwgQITfi3ThvpasfuVUFJTOgQ7JpKwIDAQAB",
   "description": "Reports visible DOM and ARIA controls to the wmaker-ai native adapter.",
   "permissions": ["activeTab", "nativeMessaging", "scripting"],
   "host_permissions": ["<all_urls>"],

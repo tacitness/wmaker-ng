@@ -13,6 +13,10 @@
 #   DISPOSABLE_PROFILE if "1", copy/seed into /tmp/profile and discard on exit
 #   PROFILE_SEED_TARBALL optional tar/tar.gz seed mounted from a secret store
 #   AUTH_ALLOWED_DOMAINS optional comma-separated START_URL host allowlist
+#   WMAKER_AI_BROWSER_ENABLE_ADAPTER if "1", install native messaging and load
+#                    the in-image DOM/ARIA adapter extension.
+#   WMAKER_AI_BROWSER_EXTENSION_DIR optional unpacked extension path.
+#   WMAKER_AI_BROWSER_EXTENSION_ID extension id allowed by native messaging.
 #   CLEAR_SINGLETON  if "1", remove stale Singleton{Lock,Socket,Cookie} from a
 #                    bind-mounted profile so a container Brave can claim it.
 #                    Off by default — it mutates the mounted (possibly host)
@@ -23,6 +27,7 @@ set -eu
 : "${BROWSER:=brave-browser}"
 : "${START_URL:=about:blank}"
 : "${USER_DATA_DIR:=/profile}"
+: "${WMAKER_AI_BROWSER_EXTENSION_ID:=dlnkidcfokpkpcpbpkgoiklfjilaijbl}"
 
 log() { echo "[wmaker-ai-browser] $*" >&2; }
 
@@ -62,6 +67,56 @@ if [ "${CLEAR_SINGLETON:-0}" = "1" ]; then
 	rm -f "$USER_DATA_DIR"/Singleton* 2>/dev/null || true
 fi
 
+browser_native_host_dirs() {
+	case "$BROWSER" in
+		*brave*)
+			echo "${HOME:-/root}/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+			;;
+		*chromium*)
+			echo "${HOME:-/root}/.config/chromium/NativeMessagingHosts"
+			;;
+		*chrome*)
+			echo "${HOME:-/root}/.config/google-chrome/NativeMessagingHosts"
+			;;
+		*)
+			echo "${HOME:-/root}/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+			echo "${HOME:-/root}/.config/chromium/NativeMessagingHosts"
+			echo "${HOME:-/root}/.config/google-chrome/NativeMessagingHosts"
+			;;
+	esac
+}
+
+extension_args=""
+if [ "${WMAKER_AI_BROWSER_ENABLE_ADAPTER:-0}" = "1" ]; then
+	extension_dir="${WMAKER_AI_BROWSER_EXTENSION_DIR:-/usr/share/wmaker-ai-browser/extension}"
+	native_template_dir="${WMAKER_AI_BROWSER_NATIVE_TEMPLATE_DIR:-/usr/share/wmaker-ai-browser/native-messaging}"
+	native_runtime_dir="${WMAKER_AI_BROWSER_NATIVE_RUNTIME_DIR:-/tmp/wmaker-ai-browser-native}"
+	host_wrapper="$native_runtime_dir/wmaker-ai-browser-host.sh"
+	host_manifest="$native_runtime_dir/wmaker_ai_browser.json"
+	ai_mcp_path="$(command -v ai-mcp)"
+
+	if [ ! -d "$extension_dir" ]; then
+		log "browser adapter extension dir is missing: $extension_dir"
+		exit 66
+	fi
+	mkdir -p "$native_runtime_dir"
+	sed \
+		-e "s#__AI_MCP_PATH__#$ai_mcp_path#g" \
+		-e "s#__EXTENSION_ID__#$WMAKER_AI_BROWSER_EXTENSION_ID#g" \
+		"$native_template_dir/wmaker-ai-browser-host.sh.in" >"$host_wrapper"
+	chmod 0755 "$host_wrapper"
+	sed \
+		-e "s#__BROWSER_HOST_PATH__#$host_wrapper#g" \
+		-e "s#__EXTENSION_ID__#$WMAKER_AI_BROWSER_EXTENSION_ID#g" \
+		"$native_template_dir/wmaker_ai_browser.json.in" >"$host_manifest"
+	for dir in $(browser_native_host_dirs); do
+		mkdir -p "$dir"
+		cp "$host_manifest" "$dir/wmaker_ai_browser.json"
+	done
+	extension_args="--load-extension=$extension_dir --disable-extensions-except=$extension_dir"
+	log "browser semantic adapter enabled (extension: $WMAKER_AI_BROWSER_EXTENSION_ID)"
+fi
+
 log "launching $BROWSER on $DISPLAY (profile: $USER_DATA_DIR, url: $START_URL)"
 # Container-appropriate flags: no zygote sandbox (no userns), fixed geometry to
 # match the Xvfb screen, quiet first-run UX.
@@ -74,6 +129,7 @@ log "launching $BROWSER on $DISPLAY (profile: $USER_DATA_DIR, url: $START_URL)"
 	--window-position=0,0 \
 	--window-size=1280,800 \
 	--start-maximized \
+	$extension_args \
 	"$START_URL" >/tmp/browser.log 2>&1 &
 
 log "exec ai-mcp (MCP over stdio)"
