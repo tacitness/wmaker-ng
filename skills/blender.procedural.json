@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "blender.procedural",
+  "status": "trusted_fixture",
+  "display_name": "Blender procedural control",
+  "launch_aliases": ["blender"],
+  "operations": ["render_cylinder", "inspect_gui"],
+  "control_surfaces": ["blender-python-api", "command-line-background-render", "at-spi", "x11-input-fallback", "vision-fallback"],
+  "observation_adapters": ["accessibility_tree", "desktop_scene", "observe"],
+  "provenance": "wmaker-ng seed skill for M7 Blender proof"
+}

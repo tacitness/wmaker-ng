@@ -28,6 +28,19 @@ contents:
     dst: /usr/bin/ai-mcp
     file_info:
       mode: 0755
+  - src: ./scripts/blender-cylinder.py
+    dst: /usr/share/wmaker-ng/blender-cylinder.py
+    file_info:
+      mode: 0644
+  - src: ./skills
+    dst: /usr/share/wmaker-ng/skills
+    type: tree
+    file_info:
+      mode: 0644
+  - src: ./docs/voice-command-control.md
+    dst: /usr/share/doc/wmaker-ai/voice-command-control.md
+    file_info:
+      mode: 0644
 
 # Signing is applied at the repo-assembly layer (see scripts/repo.sh), so the
 # recipe is identical for local (unsigned) and release (signed) runs.

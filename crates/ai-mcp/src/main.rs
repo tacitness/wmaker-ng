@@ -6,15 +6,22 @@
 //! `wmng-ewmh` (`_NET_*`). Any MCP client connects over stdio and drives a real
 //! Window Maker desktop; the WM never learns it is being driven.
 
+mod command;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use ai_proto::{DiffConfig, DiffEncoder, ScreenUpdate};
 use base64::Engine as _;
+use command::{
+    AppSkillRegistry, CommandResult, CommandSource, PlannedAction, RouteCommandParams,
+    RoutedCommand, SkillAcquisitionParams, SkillAcquisitionPlan, SkillRegistryParams,
+};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
 use rmcp::transport::stdio;
@@ -828,6 +835,48 @@ impl WmCtl {
         Ok(Json(to_accessibility_tree_out(snapshot)))
     }
 
+    #[tool(
+        description = "List app skill manifests used by the command router, including browser and Blender seed skills."
+    )]
+    async fn list_app_skills(
+        &self,
+        Parameters(p): Parameters<SkillRegistryParams>,
+    ) -> Result<Json<AppSkillRegistry>, ErrorData> {
+        Ok(Json(command::skills(p.include_draft)))
+    }
+
+    #[tool(
+        description = "Produce a reviewable app-skill acquisition plan for an unfamiliar application; never trusts the result automatically."
+    )]
+    async fn app_skill_acquisition_plan(
+        &self,
+        Parameters(p): Parameters<SkillAcquisitionParams>,
+    ) -> Result<Json<SkillAcquisitionPlan>, ErrorData> {
+        Ok(Json(command::acquisition_plan(&p)))
+    }
+
+    #[tool(
+        description = "Route a short typed or transcript-fixture command into a bounded desktop/app action with safety and audit metadata."
+    )]
+    async fn route_command(
+        &self,
+        Parameters(p): Parameters<RouteCommandParams>,
+    ) -> Result<Json<RoutedCommand>, ErrorData> {
+        let x = self.x.clone();
+        run(move || {
+            let mut routed = command::route(&p);
+            if !p.dry_run
+                && (!routed.safety.confirmation_required || p.confirmed)
+                && routed.result.status == "ready_to_execute"
+            {
+                routed.result =
+                    execute_planned_action(&x, &routed.action, p.wait_ms.unwrap_or(500))?;
+            }
+            Ok(Json(routed))
+        })
+        .await
+    }
+
     #[tool(description = "Focus (activate + raise) a window by id.")]
     async fn focus(&self, Parameters(p): Parameters<Focus>) -> Result<Json<Status>, ErrorData> {
         let x = self.x.clone();
@@ -1099,6 +1148,174 @@ async fn run<T: Send + 'static>(
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+}
+
+fn execute_planned_action(
+    x: &X,
+    action: &PlannedAction,
+    wait_ms: u64,
+) -> Result<CommandResult, ErrorData> {
+    let mut details = std::collections::BTreeMap::new();
+    match action {
+        PlannedAction::LaunchApp { command, args }
+        | PlannedAction::OpenUrl { command, args }
+        | PlannedAction::RunSkill {
+            command: Some(command),
+            args,
+            ..
+        } => {
+            let (command, args) = command_with_resolved_assets(command, args);
+            let mut child = Command::new(&command).args(&args).spawn().map_err(to_err)?;
+            details.insert("command".to_string(), command);
+            details.insert(
+                "args".to_string(),
+                serde_json::to_string(&args).map_err(to_err)?,
+            );
+            if wait_ms > 0 {
+                std::thread::sleep(Duration::from_millis(wait_ms));
+            }
+            match child.try_wait().map_err(to_err)? {
+                Some(status) => {
+                    details.insert("exit_status".to_string(), status.to_string());
+                    Ok(CommandResult {
+                        executed: true,
+                        ok: status.success(),
+                        status: if status.success() {
+                            "completed".to_string()
+                        } else {
+                            "process_exited_nonzero".to_string()
+                        },
+                        details,
+                    })
+                }
+                None => {
+                    details.insert("pid".to_string(), child.id().to_string());
+                    if let Ok(ewmh) = Ewmh::new(x) {
+                        if let Ok(windows) = ewmh.list_windows() {
+                            details.insert("window_count".to_string(), windows.len().to_string());
+                        }
+                    }
+                    Ok(CommandResult {
+                        executed: true,
+                        ok: true,
+                        status: "spawned".to_string(),
+                        details,
+                    })
+                }
+            }
+        }
+        PlannedAction::FocusWindow { window } => {
+            Ewmh::new(x)
+                .map_err(to_err)?
+                .focus(*window)
+                .map_err(to_err)?;
+            details.insert("window".to_string(), window.to_string());
+            Ok(CommandResult {
+                executed: true,
+                ok: true,
+                status: "focused".to_string(),
+                details,
+            })
+        }
+        PlannedAction::TileWindow { window, slot } => {
+            let ewmh = Ewmh::new(x).map_err(to_err)?;
+            let target = match window {
+                Some(window) => *window,
+                None => ewmh
+                    .active_window()
+                    .map_err(to_err)?
+                    .ok_or_else(|| ErrorData::invalid_params("no active window to tile", None))?,
+            };
+            let slot = match slot.as_str() {
+                "left" => TileSlot::Left,
+                "right" => TileSlot::Right,
+                "top" => TileSlot::Top,
+                "bottom" => TileSlot::Bottom,
+                "full" => TileSlot::Full,
+                other => {
+                    return Err(ErrorData::invalid_params(
+                        format!("unknown tile slot: {other}"),
+                        None,
+                    ));
+                }
+            };
+            ewmh.tile(target, slot).map_err(to_err)?;
+            details.insert("window".to_string(), target.to_string());
+            Ok(CommandResult {
+                executed: true,
+                ok: true,
+                status: "tiled".to_string(),
+                details,
+            })
+        }
+        PlannedAction::ResizeWindow {
+            window,
+            width,
+            height,
+        } => {
+            let ewmh = Ewmh::new(x).map_err(to_err)?;
+            let target = match window {
+                Some(window) => *window,
+                None => ewmh
+                    .active_window()
+                    .map_err(to_err)?
+                    .ok_or_else(|| ErrorData::invalid_params("no active window to resize", None))?,
+            };
+            let info = ewmh
+                .list_windows()
+                .map_err(to_err)?
+                .into_iter()
+                .find(|window| window.id == target)
+                .ok_or_else(|| ErrorData::invalid_params("target window not found", None))?;
+            ewmh.move_resize(
+                target,
+                i32::from(info.x),
+                i32::from(info.y),
+                *width,
+                *height,
+            )
+            .map_err(to_err)?;
+            details.insert("window".to_string(), target.to_string());
+            Ok(CommandResult {
+                executed: true,
+                ok: true,
+                status: "resized".to_string(),
+                details,
+            })
+        }
+        PlannedAction::SwitchWorkspace { workspace } => {
+            details.insert("workspace".to_string(), workspace.to_string());
+            Ok(CommandResult {
+                executed: false,
+                ok: false,
+                status: "workspace_switch_not_implemented".to_string(),
+                details,
+            })
+        }
+        PlannedAction::RunSkill { command: None, .. } | PlannedAction::Clarify { .. } => {
+            Ok(CommandResult {
+                executed: false,
+                ok: false,
+                status: "no_executable_action".to_string(),
+                details,
+            })
+        }
+    }
+}
+
+fn command_with_resolved_assets(command: &str, args: &[String]) -> (String, Vec<String>) {
+    let mut resolved = args.to_vec();
+    if command == "blender" {
+        if let Some(index) = resolved
+            .iter()
+            .position(|arg| arg == "scripts/blender-cylinder.py")
+        {
+            let script = std::env::var("WMAKER_NG_BLENDER_CYLINDER_SCRIPT")
+                .unwrap_or_else(|_| "/usr/share/wmaker-ng/blender-cylinder.py".to_string());
+            resolved[index] = script;
+        }
+    }
+    (command.to_string(), resolved)
 }
 
 fn to_err<E: std::fmt::Display>(e: E) -> ErrorData {
@@ -1776,6 +1993,9 @@ async fn main() -> anyhow::Result<()> {
     if args.first().is_some_and(|arg| arg == "browser-host") {
         return run_browser_host(&args[1..]);
     }
+    if args.first().is_some_and(|arg| arg == "route-command") {
+        return run_route_command_cli(&args[1..]);
+    }
     if args.iter().any(|arg| arg == "--check") {
         check_runtime()?;
         return Ok(());
@@ -1834,6 +2054,60 @@ fn check_runtime() -> anyhow::Result<()> {
         x.shm_available()
     );
     Ok(())
+}
+
+fn run_route_command_cli(args: &[String]) -> anyhow::Result<()> {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_route_command_help();
+        return Ok(());
+    }
+    let mut text = None;
+    let mut dry_run = false;
+    let mut source = CommandSource::TranscriptFixture;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--text" => {
+                i += 1;
+                text = args.get(i).cloned();
+            }
+            "--dry-run" => dry_run = true,
+            "--source" => {
+                i += 1;
+                source = match args.get(i).map(String::as_str) {
+                    Some("transcript_fixture") => CommandSource::TranscriptFixture,
+                    Some("push_to_talk_asr") => CommandSource::PushToTalkAsr,
+                    Some("typed") => CommandSource::Typed,
+                    Some("model_plan") => CommandSource::ModelPlan,
+                    Some("skill_replay") => CommandSource::SkillReplay,
+                    Some(other) => anyhow::bail!("unknown source: {other}"),
+                    None => anyhow::bail!("--source requires a value"),
+                };
+            }
+            other if !other.starts_with('-') && text.is_none() => text = Some(other.to_string()),
+            other => anyhow::bail!("unknown route-command argument: {other}"),
+        }
+        i += 1;
+    }
+    let text = text.ok_or_else(|| anyhow::anyhow!("route-command requires --text or TEXT"))?;
+    let routed = command::route(&RouteCommandParams {
+        text,
+        source,
+        confidence: None,
+        dry_run,
+        confirmed: false,
+        wait_ms: None,
+    });
+    println!("{}", serde_json::to_string_pretty(&routed)?);
+    Ok(())
+}
+
+fn print_route_command_help() {
+    eprintln!(
+        "Usage: ai-mcp route-command [--dry-run] [--source transcript_fixture|push_to_talk_asr|typed|model_plan|skill_replay] --text TEXT\n\n\
+         Parses a short command fixture without connecting to X. Use this for\n\
+         CI and non-audio transcript tests; live ASR feeds the same router later."
+    );
 }
 
 fn diff_config_from_env() -> DiffConfig {

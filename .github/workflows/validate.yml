@@ -60,6 +60,13 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
       - run: cargo test --workspace --locked
 
+  release-shape:
+    name: Release matrix + Helm shape
+    runs-on: wmaker-ng-ci-build
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - run: make release-matrix-check helm-check
+
   audit:
     name: cargo-audit (RUSTSEC)
     runs-on: wmaker-ng-ci-build

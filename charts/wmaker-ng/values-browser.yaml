@@ -1,0 +1,4 @@
+profile: browser
+browser:
+  enabled: true
+  homepage: https://example.com/

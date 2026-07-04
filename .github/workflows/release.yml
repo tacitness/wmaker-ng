@@ -117,6 +117,55 @@ jobs:
           path: dist/pkg/
           retention-days: 7
 
+  sandbox-image:
+    name: Publish sandbox image to ECR Public
+    needs: build
+    runs-on: wmaker-ng-ci-build
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      HAS_ECR_PUBLIC: ${{ vars.AWS_ROLE_ARN != '' && vars.ECR_PUBLIC_PUBLISH == 'true' }}
+      ECR_PUBLIC_ALIAS: ${{ vars.ECR_PUBLIC_ALIAS || 'y6d2s4r6' }}
+      ECR_PUBLIC_REPO: ${{ vars.ECR_PUBLIC_SANDBOX_REPO || 'wmaker-ai-sandbox' }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist-amd64-gnu
+          path: dist/
+      - name: Derive version from tag
+        run: echo "PKG_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Stage ai-mcp for image build
+        run: install -m 0755 dist/bin/amd64-gnu/ai-mcp sandbox/ai-mcp
+      - name: Configure AWS credentials (OIDC)
+        if: env.HAS_ECR_PUBLIC == 'true'
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v6.2.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: wmaker-ng-ecr-public-${{ github.run_id }}
+      - name: Build sandbox image
+        run: |
+          set -euo pipefail
+          docker build --network host \
+            --label "org.opencontainers.image.version=$PKG_VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "wmaker-ai-sandbox:$PKG_VERSION" \
+            -t "wmaker-ai-sandbox:latest" \
+            sandbox
+      - name: Push sandbox image to ECR Public
+        if: env.HAS_ECR_PUBLIC == 'true'
+        run: |
+          set -euo pipefail
+          repo="public.ecr.aws/$ECR_PUBLIC_ALIAS/$ECR_PUBLIC_REPO"
+          aws ecr-public get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin public.ecr.aws
+          docker tag "wmaker-ai-sandbox:$PKG_VERSION" "$repo:$PKG_VERSION"
+          docker tag "wmaker-ai-sandbox:$PKG_VERSION" "$repo:latest"
+          docker push "$repo:$PKG_VERSION"
+          docker push "$repo:latest"
+
   # ── 3. Assemble + sign repos, publish, and cut the GitHub Release ────────────
   release:
     name: Sign, publish & release

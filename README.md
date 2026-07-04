@@ -160,6 +160,14 @@ The model gets `list_windows` / `focus` / `move_resize` / `tile` /
 full observe-and-act on the live desktop. The window manager never learns it
 is being driven.
 
+Command fixtures for the voice/app-skill lane can be tested without audio or
+X:
+
+```bash
+ai-mcp route-command --dry-run --text "open browser to example dot com"
+ai-mcp route-command --dry-run --text "make a cylinder in Blender and render it"
+```
+
 ### 2. Sandboxed — a disposable desktop in Docker
 
 The sandbox image bundles Xvfb + Window Maker + `ai-mcp` into one
