@@ -38,6 +38,8 @@ RUN set -eux; \
 
 COPY launch.sh /usr/local/bin/wmaker-ai-browser
 RUN chmod +x /usr/local/bin/wmaker-ai-browser
+COPY extension/ /usr/share/wmaker-ai-browser/extension/
+COPY native-messaging/ /usr/share/wmaker-ai-browser/native-messaging/
 
 # Browser launch defaults; override at `docker run` time.
 #   BROWSER        which browser binary to launch (brave-browser | chromium)
@@ -45,7 +47,8 @@ RUN chmod +x /usr/local/bin/wmaker-ai-browser
 #   USER_DATA_DIR  --user-data-dir (bind-mount the host profile here)
 ENV BROWSER=brave-browser \
     START_URL=about:blank \
-    USER_DATA_DIR=/profile
+    USER_DATA_DIR=/profile \
+    WMAKER_AI_BROWSER_EXTENSION_ID=dlnkidcfokpkpcpbpkgoiklfjilaijbl
 
 # Xvfb + wmaker (base entrypoint) → browser (background) → ai-mcp (stdio).
 CMD ["wmaker-ai-browser"]

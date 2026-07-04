@@ -11,8 +11,10 @@ description = "Project placeholders and the secret-scanner's own example pattern
 # shape) as regex literals — not real secrets.
 paths = [
   '''\.githooks/secret-scan\.sh''',
+  '''sandbox/browser/extension/manifest\.json''',
 ]
 # `${{ secrets.X }}` / `${{ vars.X }}` are references, never values.
 regexes = [
   '''\$\{\{\s*(secrets|vars)\.[A-Za-z0-9_]+''',
+  '''key":\s*"[A-Za-z0-9+/=]{350,}"''',
 ]
