@@ -1,0 +1,74 @@
+profile: sandbox
+
+image:
+  repository: public.ecr.aws/y6d2s4r6/wmaker-ai-sandbox
+  browserRepository: public.ecr.aws/y6d2s4r6/wmaker-ai-browser
+  tag: latest
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+securityContext:
+  runAsNonRoot: false
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+service:
+  enabled: false
+  type: ClusterIP
+  mcpPort: 9090
+  novncPort: 6080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+persistence:
+  enabled: false
+  size: 5Gi
+  storageClassName: ""
+
+browser:
+  enabled: false
+  homepage: about:blank
+  profileSecretName: ""
+  extraArgs: []
+
+gpu:
+  enabled: false
+  dryRunOnly: true
+  runtimeClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+env: []

@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wmaker-ng.fullname" . }}
+  labels:
+    {{- include "wmaker-ng.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "wmaker-ng.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "wmaker-ng.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "wmaker-ng.serviceAccountName" . }}
+      {{- if and .Values.gpu.enabled .Values.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.gpu.runtimeClassName }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: wmaker-ai
+          image: "{{ ternary .Values.image.browserRepository .Values.image.repository .Values.browser.enabled }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: WMAKER_NG_PROFILE
+              value: {{ .Values.profile | quote }}
+            - name: WMAKER_AI_BROWSER_HOMEPAGE
+              value: {{ .Values.browser.homepage | quote }}
+            - name: WMAKER_GPU_DRY_RUN_ONLY
+              value: {{ .Values.gpu.dryRunOnly | quote }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.service.enabled }}
+          ports:
+            - name: mcp
+              containerPort: {{ .Values.service.mcpPort }}
+            - name: novnc
+              containerPort: {{ .Values.service.novncPort }}
+          {{- end }}
+          resources:
+            {{- if .Values.gpu.enabled }}
+            {{- toYaml (mergeOverwrite (deepCopy .Values.resources) (deepCopy .Values.gpu.resources)) | nindent 12 }}
+            {{- else }}
+            {{- toYaml .Values.resources | nindent 12 }}
+            {{- end }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: profile
+              mountPath: /home/wmaker
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: profile
+          persistentVolumeClaim:
+            claimName: {{ include "wmaker-ng.fullname" . }}-profile
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.gpu.enabled }}
+      {{- with .Values.gpu.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.gpu.enabled }}
+      {{- with .Values.gpu.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: wmaker-ng
+description: WMaker NG headed desktop automation stack for MCP-driven desktops.
+type: application
+version: 0.1.0
+appVersion: "0.1.1"
+home: https://github.com/tacitness/wmaker-ng
+sources:
+  - https://github.com/tacitness/wmaker-ng
+keywords:
+  - wmaker
+  - mcp
+  - desktop-automation
+  - xvfb
+maintainers:
+  - name: The wmaker-ng Team
+annotations:
+  artifacthub.io/category: integration-delivery

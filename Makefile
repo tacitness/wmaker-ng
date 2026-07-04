@@ -58,6 +58,10 @@ test: ## Run all tests
 mcp-smoke: ## Smoke-test ai-mcp against DISPLAY (default :9)
 	DISPLAY=$${DISPLAY:-:9} scripts/mcp-smoke.py --display "$${DISPLAY:-:9}"
 
+.PHONY: m7-command-smoke
+m7-command-smoke: ## Smoke-test the no-audio command fixture router
+	scripts/m7-command-fixture-smoke.sh
+
 # ── Quality gates ─────────────────────────────────────────────────────────────
 .PHONY: fmt
 fmt: ## Format all crates
@@ -95,7 +99,7 @@ pre-commit: fmt-check clippy secret-scan ## Fast gate run by the pre-commit hook
 pre-push: build test ## Gate run by the pre-push hook
 
 .PHONY: ci-local
-ci-local: fmt-check clippy build test audit deny ## Full local parity with the validate workflow
+ci-local: fmt-check clippy build test audit deny release-matrix-check helm-check ## Full local parity with the validate workflow plus release-shape checks
 
 # ── Git hooks ─────────────────────────────────────────────────────────────────
 .PHONY: hooks
@@ -168,6 +172,12 @@ tarballs: ## Package staged binaries into portable tarballs → dist/tarballs
 .PHONY: static-channel
 static-channel: tarballs ## Build the static .tar.zst channel → dist/static
 	scripts/static-channel.sh $(DIST_DIR)/tarballs $(PKG_VERSION) $(DIST_DIR)/static
+
+.PHONY: release-matrix-check helm-check
+release-matrix-check: ## Verify package/distribution matrix scaffolding exists
+	scripts/check-release-matrix.sh
+helm-check: ## Verify Helm chart skeleton and render all profiles when helm exists
+	scripts/check-helm-chart.sh
 
 # ── Repository assembly + signing ─────────────────────────────────────────────
 # Signing is keyed off GPG_KEY_ID (apt/rpm) and ABUILD_KEY (apk); unset = local
