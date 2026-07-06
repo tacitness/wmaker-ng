@@ -29,7 +29,7 @@ into packages by [`nfpm`](https://nfpm.goreleaser.com):
 
 Plus portable `.tar.gz` + `.sha256` per arch/libc and a first-class static
 `.tar.zst` channel from the musl builds. Static artifacts attach to the GitHub
-Release and publish under `repos.tacitsoft.dev/wmaker-ng/static/`.
+Release and publish under `repos.tacitsoft.dev/releases/wmaker-ng/`.
 
 Architectures: **x86_64** and **aarch64**. Non-EOL versions as of this writing —
 revisit when distros roll.
@@ -44,10 +44,13 @@ revisit when distros roll.
    - **apt** — `reprepro`, signed `InRelease` + `Release.gpg` (GPG).
    - **rpm** — `rpm --addsign` packages + `createrepo_c` + signed `repomd.xml` (GPG).
    - **apk** — `APKINDEX` signed with `abuild-sign` (RSA) in an Alpine container.
-   - **publish** — `aws s3 sync` into the SDD-126 `repos.tacitsoft.dev`
-     S3+CloudFront bucket under `/wmaker-ng/` (gated on `REPOS_BUCKET`).
+   - **publish** — `aws s3 sync` into the `repos.tacitsoft.dev` S3+CloudFront
+     bucket at the LINEAGE-FIRST roots `/apt /rpm /apk /releases /keys` (SDD-305;
+     gated on `REPOS_BUCKET`). No product-name path segment; `--delete` is scoped
+     per-lineage. A shared pool with a 2nd producer needs the infra `_incoming/`
+     + repo-indexer (dagobah-infra#305).
    - **static** — `.tar.zst`, `manifest.json`, `latest`, and `install.sh` under
-     `/static`.
+     `/releases/wmaker-ng/`.
    - **AUR** — optionally render `wmaker-ng-bin` / `wmaker-ai-bin` from the
      static `.tar.zst` sha256sums and push to the AUR git remotes.
    - **Gentoo** — overlay ebuilds under `packaging/gentoo/`, fed by the same
@@ -82,7 +85,10 @@ provisioned.
 | `/tacitsoft/wmaker-ng/aur-deploy-ssh-key`    | SSH private key for `aur@aur.archlinux.org` package remotes |
 
 Publishing needs no deploy key: the same OIDC role gets `s3:PutObject`/
-`s3:DeleteObject`/`s3:ListBucket` on the repos bucket (dagobah-infra#252).
+`s3:DeleteObject`/`s3:ListBucket` on the repos bucket, scoped to the lineage
+roots (`/apt /rpm /apk /releases /keys`) for the single-producer bridge. The
+multi-producer model narrows the producer grant to `/_incoming/wmaker-ng/*` and
+moves shared-metadata writes to the infra repo-indexer (dagobah-infra#305/#256).
 
 > apt/rpm use **GPG**; apk uses a **separate RSA** key. The OIDC role's trust
 > policy must include `repo:tacitness/wmaker-ng:*` and its IAM policy must grant
@@ -110,36 +116,41 @@ install the cross toolchain separately.
 
 ## Consumer install (once published + signed)
 
+Repos are LINEAGE-FIRST (SDD-305): one enrollment per lineage serves every
+TacitSoft tool — select the tool by package name.
+
 ```bash
 # Debian / Ubuntu
-curl -fsSL https://repos.tacitsoft.dev/wmaker-ng/apt/wmaker-ng-archive-keyring.asc \
-  | sudo tee /etc/apt/keyrings/wmaker-ng.asc >/dev/null
-echo "deb [signed-by=/etc/apt/keyrings/wmaker-ng.asc] https://repos.tacitsoft.dev/wmaker-ng/apt stable main" \
-  | sudo tee /etc/apt/sources.list.d/wmaker-ng.list
+curl -fsSL https://repos.tacitsoft.dev/keys/tacitsoft.gpg \
+  | sudo tee /usr/share/keyrings/tacitsoft.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/tacitsoft.gpg] https://repos.tacitsoft.dev/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/tacitsoft.list
 sudo apt update && sudo apt install wmaker-ng   # or wmaker-ai
 
-# EL9/EL10 / Fedora
-sudo tee /etc/yum.repos.d/wmaker-ng.repo <<'EOF'
-[wmaker-ng]
-name=wmaker-ng
-baseurl=https://repos.tacitsoft.dev/wmaker-ng/rpm
+# EL8 / EL9 (RHEL / Rocky / Alma) / Fedora
+sudo tee /etc/yum.repos.d/tacitsoft.repo <<'EOF'
+[tacitsoft]
+name=TacitSoft
+baseurl=https://repos.tacitsoft.dev/rpm/el/$releasever/$basearch
 enabled=1
 gpgcheck=1
-gpgkey=https://repos.tacitsoft.dev/wmaker-ng/rpm/RPM-GPG-KEY-wmaker-ng
+repo_gpgcheck=1
+gpgkey=https://repos.tacitsoft.dev/keys/tacitsoft.gpg
 EOF
 sudo dnf install wmaker-ng
 
-# Alpine
-echo "https://repos.tacitsoft.dev/wmaker-ng/apk/$(apk --print-arch)" \
+# Alpine  (apk appends /<arch>/APKINDEX.tar.gz itself)
+sudo wget -O /etc/apk/keys/tacitsoft-apk.rsa.pub \
+  https://repos.tacitsoft.dev/keys/tacitsoft-apk.rsa.pub
+echo "https://repos.tacitsoft.dev/apk/v3.20/main" \
   | sudo tee -a /etc/apk/repositories
-sudo wget -P /etc/apk/keys https://repos.tacitsoft.dev/wmaker-ng/apk/wmaker-ng.rsa.pub
 sudo apk update && sudo apk add wmaker-ng
 
 # Arch Linux / AUR
 paru -S wmaker-ng-bin   # optional: wmaker-ai-bin
 
 # Static tar.zst channel
-curl -fsSL https://repos.tacitsoft.dev/wmaker-ng/static/install.sh | sh
+curl -fsSL https://repos.tacitsoft.dev/releases/wmaker-ng/install.sh | sh
 
 # Gentoo overlay
 sudo install -d /var/db/repos/wmaker-ng

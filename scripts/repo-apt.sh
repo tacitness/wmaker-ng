@@ -25,12 +25,12 @@ mkdir -p "$REPO_DIR/conf"
 
 {
 	echo "Origin: TacitSoft"
-	echo "Label: wmaker-ng"
+	echo "Label: TacitSoft"
 	echo "Suite: stable"
 	echo "Codename: stable"
 	echo "Architectures: amd64 arm64"
 	echo "Components: main"
-	echo "Description: wmaker-ng / wmaker-ai APT repository"
+	echo "Description: TacitSoft APT repository (shared pool; select by package name)"
 	[[ -n "$GPG_KEY_ID" ]] && echo "SignWith: $GPG_KEY_ID"
 } >"$REPO_DIR/conf/distributions"
 
@@ -46,8 +46,9 @@ for deb in "${debs[@]}"; do
 	reprepro -b "$REPO_DIR" includedeb stable "$deb"
 done
 
+# The public trust anchors are published once, centrally, to the shared /keys/
+# root by the release workflow (not scattered into each lineage tree).
 if [[ -n "$GPG_KEY_ID" ]]; then
-	gpg --batch --yes --armor --export "$GPG_KEY_ID" >"$REPO_DIR/wmaker-ng-archive-keyring.asc"
 	echo "==> apt repo signed with $GPG_KEY_ID" >&2
 else
 	echo "==> apt repo built UNSIGNED (GPG_KEY_ID unset)" >&2

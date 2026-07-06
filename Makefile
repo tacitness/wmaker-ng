@@ -185,10 +185,10 @@ helm-check: ## Verify Helm chart skeleton and render all profiles when helm exis
 .PHONY: repo-apt repo-rpm repo-apk repos
 repo-apt: ## Assemble (and sign) the APT repo → dist/repo/apt
 	scripts/repo-apt.sh $(DIST_DIR)/repo/apt $(DIST_DIR)/pkg
-repo-rpm: ## Assemble (and sign) the RPM repos per ABI floor → dist/repo/rpm/el{8,9}
-	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el8 $(DIST_DIR)/pkg '*.el8.*.rpm'
-	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el9 $(DIST_DIR)/pkg '*.el9.*.rpm'
-	cp -f packaging/repo/wmaker-ng.repo $(DIST_DIR)/repo/rpm/
+repo-rpm: ## Assemble (and sign) the RPM repos per ABI floor → dist/repo/rpm/el/{8,9}/<arch>
+	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el/8 $(DIST_DIR)/pkg '*.el8.*.rpm'
+	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el/9 $(DIST_DIR)/pkg '*.el9.*.rpm'
+	cp -f packaging/repo/tacitsoft.repo $(DIST_DIR)/repo/rpm/
 repo-apk: ## Assemble (and sign) the APK repo → dist/repo/apk (Alpine only)
 	scripts/repo-apk.sh $(DIST_DIR)/repo/apk $(DIST_DIR)/pkg
 repos: repo-apt repo-rpm repo-apk ## Assemble all repositories
