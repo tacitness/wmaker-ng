@@ -29,7 +29,7 @@ into packages by [`nfpm`](https://nfpm.goreleaser.com):
 
 Plus portable `.tar.gz` + `.sha256` per arch/libc and a first-class static
 `.tar.zst` channel from the musl builds. Static artifacts attach to the GitHub
-Release and publish under `repos.tacitsoft.dev/wmaker-ng/static/`.
+Release and publish under `repos.tacitsoft.dev/releases/wmaker-ng/`.
 
 Architectures: **x86_64** and **aarch64**. Non-EOL versions as of this writing —
 revisit when distros roll.
@@ -40,54 +40,48 @@ revisit when distros roll.
    (glibc floor pin + musl static) and `scripts/tarball.sh` packs each set.
 2. **packages** — `make packages` → `nfpm` renders deb/rpm from the glibc stage
    and apk from the musl stage, both arches.
-3. **release** — assemble + sign repos, publish, cut the GitHub Release:
-   - **apt** — `reprepro`, signed `InRelease` + `Release.gpg` (GPG).
-   - **rpm** — `rpm --addsign` packages + `createrepo_c` + signed `repomd.xml` (GPG).
-   - **apk** — `APKINDEX` signed with `abuild-sign` (RSA) in an Alpine container.
-   - **publish** — `aws s3 sync` into the SDD-126 `repos.tacitsoft.dev`
-     S3+CloudFront bucket under `/wmaker-ng/` (gated on `REPOS_BUCKET`).
-   - **static** — `.tar.zst`, `manifest.json`, `latest`, and `install.sh` under
-     `/static`.
+3. **release** — build the static channel, hand off, cut the GitHub Release:
+   - **handoff** — `scripts/publish.sh` stages packages into the `_incoming/`
+     contract shape and uploads to `_incoming/wmaker-ng/` (gated on
+     `REPOS_BUCKET`). The infra-owned **repo-indexer** (dagobah-infra#306,
+     SDD-305 §5) — the single writer — pools them, `rpm --addsign`s, rebuilds
+     and GPG/RSA-signs all apt/rpm/apk metadata, and publishes the lineage
+     roots. This producer signs nothing and holds no repo keys. (Consequence:
+     the rpm files attached to the GitHub Release are unsigned copies; the
+     repo-served rpms are signed. sha256s cover both.)
+   - **static** — `.tar.zst`, `manifest.json`, `latest`, and `install.sh`
+     synced directly (additive) to `/releases/wmaker-ng/` — product-scoped, no
+     shared metadata, so no indexer round-trip.
+   - Indexer sweeps hourly; for immediate publish:
+     `gh workflow run repo-indexer.yml -R tacitness/dagobah-infra`.
    - **AUR** — optionally render `wmaker-ng-bin` / `wmaker-ai-bin` from the
      static `.tar.zst` sha256sums and push to the AUR git remotes.
    - **Gentoo** — overlay ebuilds under `packaging/gentoo/`, fed by the same
      static `.tar.zst` release artifacts.
 
-## Secrets — OIDC + AWS Secrets Manager (house pattern)
+## Secrets — OIDC only; no repo signing keys in this repo's lane
 
-No signing keys live as GitHub Actions secrets. The `release` job assumes an AWS
-role via **OIDC** and pulls keys from **Secrets Manager** at release time — one
-rotatable source of truth, consistent with dagobah-infra (ESO → Secrets
-Manager). Signing **gates on the `AWS_ROLE_ARN` repo variable**; repo
-publishing additionally gates on **`REPOS_BUCKET`** (the S3 bucket behind
-`repos.tacitsoft.dev`, provisioned by dagobah-infra `public-dist`). Until they
-are set, the pipeline still builds, packages, assembles *unsigned* repos, and
-cuts the GitHub Release; each lane hardens automatically once infra wires its
-variable. Public key halves (GPG + apk RSA) are exported into the repo tree
-under `/keys/` at release time.
+The `release` job assumes an AWS role via **OIDC**. Since the `_incoming`
+cutover (dagobah-infra#306) this producer holds **no repo signing keys** — the
+GPG/apk keys live with the infra repo-indexer, which signs everything it
+publishes. The only producer-side secret is the AUR deploy key, pulled from
+Secrets Manager at release time.
 
 **Repo variables** (GitHub → Settings → Variables): `AWS_ROLE_ARN` = the OIDC
 role to assume (`us-west-2`); `REPOS_BUCKET` = the repos S3 bucket (activates
-publishing). Optional overrides: `SM_GPG_KEY`, `SM_APK_KEY`, `SM_AUR_KEY` if
-the Secrets Manager paths differ from the defaults below. Set
-`AUR_PUBLISH=true` only after the AUR package remotes and deploy key are
-provisioned.
+the handoff). Optional: `SM_AUR_KEY` override; set `AUR_PUBLISH=true` only
+after the AUR package remotes and deploy key are provisioned.
 
-**Secrets Manager entries** (`us-west-2`, ops to provision):
+**Secrets Manager entries** (`us-west-2`):
 
 | Secret id (default)                          | Contents                                            |
 |----------------------------------------------|-----------------------------------------------------|
-| `/tacitsoft/wmaker-ng/gpg-signing-key`       | Armored GPG **private** key — signs apt + rpm (key id derived on import) |
-| `/tacitsoft/wmaker-ng/apk-signing-key`       | abuild **RSA** private key — signs the apk `APKINDEX` |
 | `/tacitsoft/wmaker-ng/aur-deploy-ssh-key`    | SSH private key for `aur@aur.archlinux.org` package remotes |
+| `/tacitsoft/wmaker-ng/{gpg,apk}-signing-key` | **Indexer-only** now — producer IAM no longer grants them |
 
-Publishing needs no deploy key: the same OIDC role gets `s3:PutObject`/
-`s3:DeleteObject`/`s3:ListBucket` on the repos bucket (dagobah-infra#252).
-
-> apt/rpm use **GPG**; apk uses a **separate RSA** key. The OIDC role's trust
-> policy must include `repo:tacitness/wmaker-ng:*` and its IAM policy must grant
-> `secretsmanager:GetSecretValue` on `/tacitsoft/wmaker-ng/*`. Never add secrets
-> from this repo; infra provisions them in Secrets Manager.
+The OIDC role (`wmaker_ng_publish_mode = "incoming"` in dagobah-infra prod) is
+scoped to `_incoming/wmaker-ng/*` + `releases/wmaker-ng/*` — this producer
+cannot touch shared metadata, other tenants' trees, or `/keys/`.
 
 ## Secret scanning
 
@@ -100,46 +94,51 @@ hook falls back to a built-in regex scan if gitleaks is absent.
 
 ```bash
 make release-local   # cross-build + packages + tarballs into dist/
-make repo-apt repo-rpm   # assemble unsigned apt/rpm repos locally
-AUR_DRY_RUN=1 scripts/publish-aur.sh dist/static/releases/"$PKG_VERSION" "$PKG_VERSION"  # render AUR files, no push
+AUR_DRY_RUN=1 scripts/publish-aur.sh dist/static/"$PKG_VERSION" "$PKG_VERSION"  # render AUR files, no push
 ```
 
-`make repo-apk` needs an Alpine host (`apk` + `abuild-sign`). Cross-builds need
-`cargo-zigbuild` + `zig`; `make install-dev-tools` covers `cargo-audit`/`cargo-deny`,
-install the cross toolchain separately.
+Repo assembly is no longer local — the dagobah-infra repo-indexer owns it
+(`scripts/repo-indexer/indexer.sh` there, runnable against a scratch bucket).
+Cross-builds need `cargo-zigbuild` + `zig`; `make install-dev-tools` covers
+`cargo-audit`/`cargo-deny`, install the cross toolchain separately.
 
 ## Consumer install (once published + signed)
 
+Repos are LINEAGE-FIRST (SDD-305): one enrollment per lineage serves every
+TacitSoft tool — select the tool by package name.
+
 ```bash
 # Debian / Ubuntu
-curl -fsSL https://repos.tacitsoft.dev/wmaker-ng/apt/wmaker-ng-archive-keyring.asc \
-  | sudo tee /etc/apt/keyrings/wmaker-ng.asc >/dev/null
-echo "deb [signed-by=/etc/apt/keyrings/wmaker-ng.asc] https://repos.tacitsoft.dev/wmaker-ng/apt stable main" \
-  | sudo tee /etc/apt/sources.list.d/wmaker-ng.list
+curl -fsSL https://repos.tacitsoft.dev/keys/tacitsoft.gpg \
+  | sudo tee /usr/share/keyrings/tacitsoft.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/tacitsoft.gpg] https://repos.tacitsoft.dev/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/tacitsoft.list
 sudo apt update && sudo apt install wmaker-ng   # or wmaker-ai
 
-# EL9/EL10 / Fedora
-sudo tee /etc/yum.repos.d/wmaker-ng.repo <<'EOF'
-[wmaker-ng]
-name=wmaker-ng
-baseurl=https://repos.tacitsoft.dev/wmaker-ng/rpm
+# EL8 / EL9 (RHEL / Rocky / Alma) / Fedora
+sudo tee /etc/yum.repos.d/tacitsoft.repo <<'EOF'
+[tacitsoft]
+name=TacitSoft
+baseurl=https://repos.tacitsoft.dev/rpm/el/$releasever/$basearch
 enabled=1
 gpgcheck=1
-gpgkey=https://repos.tacitsoft.dev/wmaker-ng/rpm/RPM-GPG-KEY-wmaker-ng
+repo_gpgcheck=1
+gpgkey=https://repos.tacitsoft.dev/keys/tacitsoft.gpg
 EOF
 sudo dnf install wmaker-ng
 
-# Alpine
-echo "https://repos.tacitsoft.dev/wmaker-ng/apk/$(apk --print-arch)" \
+# Alpine  (apk appends /<arch>/APKINDEX.tar.gz itself)
+sudo wget -O /etc/apk/keys/tacitsoft-apk.rsa.pub \
+  https://repos.tacitsoft.dev/keys/tacitsoft-apk.rsa.pub
+echo "https://repos.tacitsoft.dev/apk/v3.20/main" \
   | sudo tee -a /etc/apk/repositories
-sudo wget -P /etc/apk/keys https://repos.tacitsoft.dev/wmaker-ng/apk/wmaker-ng.rsa.pub
 sudo apk update && sudo apk add wmaker-ng
 
 # Arch Linux / AUR
 paru -S wmaker-ng-bin   # optional: wmaker-ai-bin
 
 # Static tar.zst channel
-curl -fsSL https://repos.tacitsoft.dev/wmaker-ng/static/install.sh | sh
+curl -fsSL https://repos.tacitsoft.dev/releases/wmaker-ng/install.sh | sh
 
 # Gentoo overlay
 sudo install -d /var/db/repos/wmaker-ng

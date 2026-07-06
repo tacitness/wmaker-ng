@@ -179,23 +179,13 @@ release-matrix-check: ## Verify package/distribution matrix scaffolding exists
 helm-check: ## Verify Helm chart skeleton and render all profiles when helm exists
 	scripts/check-helm-chart.sh
 
-# ── Repository assembly + signing ─────────────────────────────────────────────
-# Signing is keyed off GPG_KEY_ID (apt/rpm) and ABUILD_KEY (apk); unset = local
-# unsigned build. apk assembly needs an Alpine host (apk + abuild-sign).
-.PHONY: repo-apt repo-rpm repo-apk repos
-repo-apt: ## Assemble (and sign) the APT repo → dist/repo/apt
-	scripts/repo-apt.sh $(DIST_DIR)/repo/apt $(DIST_DIR)/pkg
-repo-rpm: ## Assemble (and sign) the RPM repos per ABI floor → dist/repo/rpm/el{8,9}
-	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el8 $(DIST_DIR)/pkg '*.el8.*.rpm'
-	scripts/repo-rpm.sh $(DIST_DIR)/repo/rpm/el9 $(DIST_DIR)/pkg '*.el9.*.rpm'
-	cp -f packaging/repo/wmaker-ng.repo $(DIST_DIR)/repo/rpm/
-repo-apk: ## Assemble (and sign) the APK repo → dist/repo/apk (Alpine only)
-	scripts/repo-apk.sh $(DIST_DIR)/repo/apk $(DIST_DIR)/pkg
-repos: repo-apt repo-rpm repo-apk ## Assemble all repositories
-
+# ── Publish (incoming model, dagobah-infra#306) ──────────────────────────────
+# Repo assembly + signing moved to the infra-owned repo-indexer (SDD-305 §5):
+# this producer only hands packages to _incoming/wmaker-ng/ and syncs its own
+# releases/wmaker-ng/ channel. No repo signing keys live in this repo's lane.
 .PHONY: publish
-publish: ## s3-sync the assembled repos → repos.tacitsoft.dev (needs REPOS_BUCKET)
-	scripts/publish.sh $(DIST_DIR)/repo
+publish: ## Hand packages to the repos.tacitsoft.dev indexer (needs REPOS_BUCKET)
+	scripts/publish.sh $(DIST_DIR)/pkg $(DIST_DIR)/repo/releases/wmaker-ng
 
 .PHONY: release-local
 release-local: cross-build packages static-channel ## Full release build, no publish (CI parity sans signing)

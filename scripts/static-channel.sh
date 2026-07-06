@@ -5,14 +5,15 @@
 # Usage:
 #   scripts/static-channel.sh <tarball-dir> <version> [out-dir]
 #
-# Consumes the musl release tarballs and emits:
-#   dist/static/releases/<version>/*.tar.zst
-#   dist/static/releases/<version>/*.sha256
-#   dist/static/releases/<version>/manifest.json
-#   dist/static/releases/<version>/VERSION
-#   dist/static/latest -> releases/<version>
-#   dist/static/install.sh
-#   dist/static/manifest.json
+# Consumes the musl release tarballs and emits, under <out-dir> (the tool's
+# releases root, e.g. dist/repo/releases/wmaker-ng — lineage-first per SDD-305):
+#   <out-dir>/<version>/*.tar.zst
+#   <out-dir>/<version>/*.sha256
+#   <out-dir>/<version>/manifest.json
+#   <out-dir>/<version>/VERSION
+#   <out-dir>/latest -> <version>
+#   <out-dir>/install.sh
+#   <out-dir>/manifest.json
 # ============================================================================
 set -euo pipefail
 
@@ -22,7 +23,10 @@ PKG_VERSION="${2:?missing version}"
 # and root-vs-runner ownership would trip git's dubious-ownership check).
 ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 OUT_DIR="${3:-$ROOT_DIR/dist/static}"
-VERSION_DIR="$OUT_DIR/releases/$PKG_VERSION"
+# <out-dir> is the tool's releases root; versions sit directly under it as
+# <out-dir>/<version>/ with a <out-dir>/latest -> <version> alias (no extra
+# releases/ segment — that is supplied by the lineage path releases/<tool>/).
+VERSION_DIR="$OUT_DIR/$PKG_VERSION"
 
 require() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -81,6 +85,6 @@ printf '%s\n' "$PKG_VERSION" >"$VERSION_DIR/VERSION"
 cp "$ROOT_DIR/packaging/static/install.sh" "$OUT_DIR/install.sh"
 chmod 0755 "$OUT_DIR/install.sh"
 cp "$VERSION_DIR/manifest.json" "$OUT_DIR/manifest.json"
-ln -sfn "releases/$PKG_VERSION" "$OUT_DIR/latest"
+ln -sfn "$PKG_VERSION" "$OUT_DIR/latest"
 
 echo "==> static channel: $OUT_DIR" >&2

@@ -2,7 +2,7 @@
 # Install wmaker-ng static release binaries from repos.tacitsoft.dev.
 set -eu
 
-BASE_URL="${WMAKER_NG_STATIC_URL:-https://repos.tacitsoft.dev/wmaker-ng/static}"
+BASE_URL="${WMAKER_NG_STATIC_URL:-https://repos.tacitsoft.dev/releases/wmaker-ng}"
 VERSION="${WMAKER_NG_VERSION:-latest}"
 PREFIX="${PREFIX:-/usr/local}"
 TMPDIR="${TMPDIR:-/tmp}"
@@ -49,7 +49,7 @@ if [ "$VERSION" = "latest" ]; then
 fi
 
 file="wmaker-ng-$VERSION-$arch-musl.tar.zst"
-url="$BASE_URL/releases/$VERSION/$file"
+url="$BASE_URL/$VERSION/$file"
 
 fetch "$url" "$work/$file"
 fetch "$url.sha256" "$work/$file.sha256"

@@ -176,13 +176,11 @@ jobs:
       id-token: write # OIDC: assume the AWS role
     env:
       AWS_REGION: us-west-2
-      # Secrets Manager secret ids (override via repo vars if infra names differ).
-      SM_GPG_KEY: ${{ vars.SM_GPG_KEY || '/tacitsoft/wmaker-ng/gpg-signing-key' }}
-      SM_APK_KEY: ${{ vars.SM_APK_KEY || '/tacitsoft/wmaker-ng/apk-signing-key' }}
+      # INCOMING MODEL (dagobah-infra#306, SDD-305 §5): this producer holds NO
+      # repo signing keys and writes NO shared metadata — it hands packages to
+      # _incoming/wmaker-ng/ and the infra repo-indexer signs + publishes.
+      # Only the AUR deploy key remains producer-side.
       SM_AUR_KEY: ${{ vars.SM_AUR_KEY || '/tacitsoft/wmaker-ng/aur-deploy-ssh-key' }}
-      # Signing activates once infra sets the AWS_ROLE_ARN repo variable;
-      # repo publishing additionally needs REPOS_BUCKET (deferred until the
-      # SDD-126 S3+CloudFront site is applied — dagobah-infra#252).
       HAS_AWS: ${{ vars.AWS_ROLE_ARN != '' }}
       HAS_REPOS: ${{ vars.AWS_ROLE_ARN != '' && vars.REPOS_BUCKET != '' }}
       HAS_AUR: ${{ vars.AUR_PUBLISH == 'true' && vars.AWS_ROLE_ARN != '' }}
@@ -207,77 +205,29 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: wmaker-ng-release-${{ github.run_id }}
 
-      - name: Fetch signing material from Secrets Manager
-        if: env.HAS_AWS == 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p dist/.keys && chmod 700 dist/.keys
-          # GPG private key → apt (reprepro) + rpm (rpm --addsign). Kept on
-          # disk (0600, ephemeral runner) so the assembly containers can
-          # import it; key id derived via the host gpg.
-          aws secretsmanager get-secret-value --secret-id "$SM_GPG_KEY" \
-            --query SecretString --output text > dist/.keys/gpg-signing-key.asc
-          chmod 600 dist/.keys/gpg-signing-key.asc
-          gpg --batch --import dist/.keys/gpg-signing-key.asc
-          key_id="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{print $5; exit}')"
-          echo "GPG_KEY_ID=$key_id" >> "$GITHUB_ENV"
-          # apk RSA private key → abuild-sign (separate key from GPG).
-          aws secretsmanager get-secret-value --secret-id "$SM_APK_KEY" \
-            --query SecretString --output text > dist/.keys/wmaker-ng.rsa
-          chmod 600 dist/.keys/wmaker-ng.rsa
-          # Matching .pub so repo-apk.sh exports it into the repo tree —
-          # clients install it as /etc/apk/keys/wmaker-ng.rsa.pub.
-          openssl rsa -in dist/.keys/wmaker-ng.rsa -pubout \
-            -out dist/.keys/wmaker-ng.rsa.pub 2>/dev/null
-          echo "ABUILD_KEY=$PWD/dist/.keys/wmaker-ng.rsa" >> "$GITHUB_ENV"
-
-      - name: Assemble apt + rpm repos + static channel (Debian container)
-        # Rootless runners carry no reprepro/createrepo_c/rpm/zstd — run the
-        # assembly in a container (dind), like the apk stage below.
+      - name: Build static tar.zst channel (Debian container)
+        # Rootless runners carry no zstd — run in a container (dind).
+        # No repo assembly and no signing here: the repo-indexer
+        # (dagobah-infra#306) owns shared metadata + keys.
         run: |
           set -euo pipefail
           # --network host: see packaging job — dind runs --iptables=false.
           docker run --rm --network host -v "$PWD:/w" -w /w \
-            -e PKG_VERSION -e GPG_KEY_ID \
+            -e PKG_VERSION \
             -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             debian:trixie-slim bash -c '
               set -euo pipefail
               apt-get update -qq
-              apt-get install -y -qq --no-install-recommends \
-                reprepro createrepo-c rpm gnupg zstd make >/dev/null
-              if [ -s dist/.keys/gpg-signing-key.asc ]; then
-                gpg --batch --quiet --import dist/.keys/gpg-signing-key.asc
-              fi
-              make repo-apt repo-rpm
-              scripts/static-channel.sh dist/tarballs "$PKG_VERSION" dist/repo/static
+              apt-get install -y -qq --no-install-recommends zstd >/dev/null
+              scripts/static-channel.sh dist/tarballs "$PKG_VERSION" dist/repo/releases/wmaker-ng
               chown -R "$HOST_UID:$HOST_GID" dist
             '
 
-      - name: Assemble apk repo (Alpine container)
-        run: |
-          keyenv=""
-          [ -n "${ABUILD_KEY:-}" ] && keyenv="-e ABUILD_KEY=/w/dist/.keys/wmaker-ng.rsa"
-          docker run --rm --network host -v "$PWD:/w" -w /w $keyenv \
-            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-            alpine:3.24 sh -c \
-            'apk add --no-cache bash abuild >/dev/null \
-             && bash scripts/repo-apk.sh dist/repo/apk dist/pkg \
-             && chown -R "$HOST_UID:$HOST_GID" dist/repo/apk'
-
-      - name: Export public keys into the repo tree
-        if: env.HAS_AWS == 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p dist/repo/keys
-          gpg --batch --armor --export "$GPG_KEY_ID" \
-            > dist/repo/keys/wmaker-ng-release.gpg.asc
-          cp dist/.keys/wmaker-ng.rsa.pub dist/repo/keys/wmaker-ng.rsa.pub
-
-      - name: Publish repos to repos.tacitsoft.dev
+      - name: Hand off packages to the repo-indexer
         if: env.HAS_REPOS == 'true'
         env:
           REPOS_BUCKET: ${{ vars.REPOS_BUCKET }}
-        run: scripts/publish.sh dist/repo
+        run: scripts/publish.sh dist/pkg dist/repo/releases/wmaker-ng
 
       - name: Create GitHub Release
         env:
@@ -291,7 +241,7 @@ jobs:
             gh release create "$GITHUB_REF_NAME" \
               --title "$GITHUB_REF_NAME" \
               --generate-notes \
-              dist/tarballs/* dist/pkg/* dist/repo/static/install.sh dist/repo/static/releases/$PKG_VERSION/*
+              dist/tarballs/* dist/pkg/* dist/repo/releases/wmaker-ng/install.sh dist/repo/releases/wmaker-ng/$PKG_VERSION/*
           fi
 
       - name: Publish AUR packages
@@ -303,4 +253,4 @@ jobs:
             --query SecretString --output text | ssh-add -
           mkdir -p ~/.ssh
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
-          scripts/publish-aur.sh dist/repo/static/releases/$PKG_VERSION "$PKG_VERSION"
+          scripts/publish-aur.sh dist/repo/releases/wmaker-ng/$PKG_VERSION "$PKG_VERSION"
