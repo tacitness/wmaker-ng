@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+title="${WMAKER_TERMINAL_TITLE:-wmaker terminal}"
+
+if command -v xfce4-terminal >/dev/null 2>&1; then
+    exec xfce4-terminal --title="$title" --command=/usr/local/bin/wmaker-terminal-shell
+fi
+
+exec xterm -T "$title" -e /usr/local/bin/wmaker-terminal-shell

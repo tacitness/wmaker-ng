@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec brave-browser --no-sandbox --new-window "${1:-about:blank}"

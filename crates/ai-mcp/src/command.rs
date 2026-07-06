@@ -263,7 +263,8 @@ pub fn skills(include_draft: bool) -> AppSkillRegistry {
             provenance: "wmaker-ng seed skill".to_string(),
             launch_aliases: vec![
                 "browser".to_string(),
-                "firefox".to_string(),
+                "brave".to_string(),
+                "chrome".to_string(),
                 "web".to_string(),
             ],
             operations: vec![
@@ -288,7 +289,10 @@ pub fn skills(include_draft: bool) -> AppSkillRegistry {
                 "observe".to_string(),
             ],
             prerequisites: vec!["managed browser launcher configured".to_string()],
-            examples: vec!["open browser to linkedin.com".to_string()],
+            examples: vec![
+                "open browser to linkedin.com".to_string(),
+                "open chrome".to_string(),
+            ],
         },
         AppSkill {
             id: "blender.procedural".to_string(),
@@ -426,13 +430,11 @@ fn parse_command(normalized: &str) -> (CommandIntent, BTreeMap<String, String>, 
     if let Some(rest) = normalized.strip_prefix("open ") {
         let app = rest.split_whitespace().next().unwrap_or(rest).to_string();
         slots.insert("app".to_string(), app.clone());
+        let (command, args) = resolve_launch_alias(&app);
         return (
             CommandIntent::OpenApp,
             slots,
-            PlannedAction::LaunchApp {
-                command: app,
-                args: Vec::new(),
-            },
+            PlannedAction::LaunchApp { command, args },
         );
     }
 
@@ -487,6 +489,19 @@ fn parse_command(normalized: &str) -> (CommandIntent, BTreeMap<String, String>, 
             reason: "no deterministic command pattern matched".to_string(),
         },
     )
+}
+
+fn resolve_launch_alias(app: &str) -> (String, Vec<String>) {
+    match app {
+        "terminal" | "shell" | "console" => ("wmaker-open-terminal".to_string(), Vec::new()),
+        "browser" | "web" | "brave" => ("wmaker-open-browser".to_string(), Vec::new()),
+        "chrome" | "chromium" => ("wmaker-open-chrome".to_string(), Vec::new()),
+        "blender" => ("wmaker-open-blender".to_string(), Vec::new()),
+        "libreoffice" | "office" | "writer" => ("wmaker-open-libreoffice".to_string(), Vec::new()),
+        "gimp" => ("wmaker-open-gimp".to_string(), Vec::new()),
+        "inkscape" => ("wmaker-open-inkscape".to_string(), Vec::new()),
+        other => (other.to_string(), Vec::new()),
+    }
 }
 
 fn classify_action(action: &PlannedAction) -> SafetyDecision {
@@ -591,6 +606,28 @@ mod tests {
         assert!(matches!(routed.intent, CommandIntent::RunAppSkill));
         assert_eq!(routed.slots["operation"], "render_cylinder");
         assert!(!routed.safety.confirmation_required);
+    }
+
+    #[test]
+    fn routes_open_terminal_to_deterministic_launcher() {
+        let routed = route(&RouteCommandParams {
+            text: "open terminal".to_string(),
+            source: CommandSource::Typed,
+            confidence: None,
+            dry_run: true,
+            confirmed: false,
+            wait_ms: None,
+        });
+
+        assert!(matches!(routed.intent, CommandIntent::OpenApp));
+        assert_eq!(routed.slots["app"], "terminal");
+        match routed.action {
+            PlannedAction::LaunchApp { command, args } => {
+                assert_eq!(command, "wmaker-open-terminal");
+                assert!(args.is_empty());
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
     }
 
     #[test]

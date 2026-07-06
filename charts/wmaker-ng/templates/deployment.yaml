@@ -23,6 +23,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "wmaker-ng.serviceAccountName" . }}
+      automountServiceAccountToken: false
       {{- if and .Values.gpu.enabled .Values.gpu.runtimeClassName }}
       runtimeClassName: {{ .Values.gpu.runtimeClassName }}
       {{- end }}
@@ -30,7 +31,7 @@ spec:
         {{- toYaml .Values.securityContext | nindent 8 }}
       containers:
         - name: wmaker-ai
-          image: "{{ ternary .Values.image.browserRepository .Values.image.repository .Values.browser.enabled }}:{{ .Values.image.tag }}"
+          image: "{{ if .Values.workstation.enabled }}{{ .Values.image.workstationRepository }}{{ else if .Values.browser.enabled }}{{ .Values.image.browserRepository }}{{ else }}{{ .Values.image.repository }}{{ end }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
@@ -39,6 +40,8 @@ spec:
               value: {{ .Values.profile | quote }}
             - name: WMAKER_AI_BROWSER_HOMEPAGE
               value: {{ .Values.browser.homepage | quote }}
+            - name: WMAKER_AI_WORKSTATION_ENABLED
+              value: {{ .Values.workstation.enabled | quote }}
             - name: WMAKER_GPU_DRY_RUN_ONLY
               value: {{ .Values.gpu.dryRunOnly | quote }}
             {{- with .Values.env }}
@@ -60,13 +63,22 @@ spec:
           {{- if .Values.persistence.enabled }}
           volumeMounts:
             - name: profile
-              mountPath: /home/wmaker
+              mountPath: /profile
+            {{- if and .Values.workstation.enabled .Values.persistence.workspace.enabled }}
+            - name: workspace
+              mountPath: /workspace
+            {{- end }}
           {{- end }}
       {{- if .Values.persistence.enabled }}
       volumes:
         - name: profile
           persistentVolumeClaim:
             claimName: {{ include "wmaker-ng.fullname" . }}-profile
+        {{- if and .Values.workstation.enabled .Values.persistence.workspace.enabled }}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: {{ include "wmaker-ng.fullname" . }}-workspace
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

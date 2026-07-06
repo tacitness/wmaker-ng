@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=WMaker LibreOffice
+Exec=wmaker-open-libreoffice
+Terminal=false
+Categories=Office;
+StartupNotify=true

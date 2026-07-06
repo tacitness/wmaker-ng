@@ -7,7 +7,19 @@ Profiles:
 
 - `sandbox`: CPU-only `Xvfb + Window Maker + ai-mcp`.
 - `browser`: sandbox plus browser automation image.
+- `workstation`: browser plus terminal, Chromium, Blender, office/image tools,
+  and the `/profile` + `/workspace` persistence split.
 - `gpu`: render-gated profile for future accelerated desktop/Blender work.
+
+Workstation chart contract:
+
+- pod tokens stay disabled with `automountServiceAccountToken: false`
+- pod seccomp stays on `RuntimeDefault`
+- containers drop all Linux capabilities and disallow privilege escalation
+- `/profile` remains the single-writer browser identity PVC
+- `/workspace` is a separate writable PVC for app state and artifacts
+- the workstation values file raises requests/limits to `2/6` vCPU,
+  `4/12Gi` memory, and `8/16Gi` ephemeral storage
 
 Render checks:
 
@@ -15,8 +27,9 @@ Render checks:
 scripts/check-helm-chart.sh
 ```
 
-When Helm is installed the script runs `helm lint` and renders all three
-profiles. Without Helm it performs a repository-shape check so CI can still
+When Helm is installed the script runs `helm lint` and renders the sandbox,
+browser, workstation, and gpu variants. Without Helm it performs a
+repository-shape check so CI can still
 protect the chart skeleton on minimal runners.
 
 The GPU profile is intentionally dry-run only until the Kubernetes GPU/display

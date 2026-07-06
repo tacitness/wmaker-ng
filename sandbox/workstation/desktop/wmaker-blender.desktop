@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=WMaker Blender
+Exec=wmaker-open-blender
+Terminal=false
+Categories=Graphics;3DGraphics;
+StartupNotify=true

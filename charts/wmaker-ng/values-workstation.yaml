@@ -1,0 +1,19 @@
+profile: workstation
+browser:
+  enabled: true
+  homepage: about:blank
+workstation:
+  enabled: true
+persistence:
+  enabled: true
+  workspace:
+    enabled: true
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+    ephemeral-storage: 8Gi
+  limits:
+    cpu: "6"
+    memory: 12Gi
+    ephemeral-storage: 16Gi

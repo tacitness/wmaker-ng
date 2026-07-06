@@ -3,6 +3,7 @@ profile: sandbox
 image:
   repository: public.ecr.aws/y6d2s4r6/wmaker-ai-sandbox
   browserRepository: public.ecr.aws/y6d2s4r6/wmaker-ai-browser
+  workstationRepository: public.ecr.aws/y6d2s4r6/wmaker-ai-workstation
   tag: latest
   pullPolicy: IfNotPresent
 
@@ -20,10 +21,15 @@ podAnnotations: {}
 podLabels: {}
 
 securityContext:
-  runAsNonRoot: false
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
 resources:
   requests:
@@ -48,14 +54,22 @@ ingress:
 
 persistence:
   enabled: false
-  size: 5Gi
-  storageClassName: ""
+  profile:
+    size: 5Gi
+    storageClassName: ""
+  workspace:
+    enabled: false
+    size: 20Gi
+    storageClassName: ""
 
 browser:
   enabled: false
   homepage: about:blank
   profileSecretName: ""
   extraArgs: []
+
+workstation:
+  enabled: false
 
 gpu:
   enabled: false

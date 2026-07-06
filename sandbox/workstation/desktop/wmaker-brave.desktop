@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=WMaker Brave Browser
+Exec=wmaker-open-browser
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true

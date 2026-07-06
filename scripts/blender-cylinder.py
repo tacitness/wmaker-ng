@@ -1,8 +1,9 @@
+import os
 import pathlib
 
 import bpy
 
-out_dir = pathlib.Path("/tmp/wmaker-ng/blender")
+out_dir = pathlib.Path(os.environ.get("WMAKER_BLENDER_OUTPUT_DIR", "/tmp/wmaker-ng/blender"))
 out_dir.mkdir(parents=True, exist_ok=True)
 
 bpy.ops.object.select_all(action="SELECT")
@@ -25,7 +26,11 @@ light.data.size = 4
 bpy.ops.object.camera_add(location=(4, -6, 3), rotation=(1.1, 0, 0.58))
 bpy.context.scene.camera = bpy.context.object
 
-bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+try:
+    bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"
+except TypeError:
+    # Ubuntu Noble ships Blender 4.0, whose Eevee identifier predates 4.2.
+    bpy.context.scene.render.engine = "BLENDER_EEVEE"
 bpy.context.scene.render.resolution_x = 1280
 bpy.context.scene.render.resolution_y = 720
 bpy.context.scene.render.filepath = str(out_dir / "cylinder.png")
