@@ -1,63 +1,89 @@
 #!/usr/bin/env bash
 # ============================================================================
-# publish.sh — sync the assembled repos to the repos.tacitsoft.dev S3 bucket.
+# publish.sh — hand packages to the repos.tacitsoft.dev repo-indexer.
 #
-# Usage: scripts/publish.sh <repo-dir>
-#   repo-dir: the assembled repo tree (e.g. dist/repo) with lineage subtrees
-#             apt/ rpm/ apk/ releases/ and a shared keys/ dir.
+# Usage: scripts/publish.sh <pkg-dir> <releases-dir>
+#   pkg-dir:      built packages (dist/pkg: *.deb, *.el{8,9}.*.rpm, *.apk)
+#   releases-dir: the static tar.zst channel (dist/repo/releases/wmaker-ng)
 #
-# Env: REPOS_BUCKET — S3 bucket backing repos.tacitsoft.dev (required; CI gates
-#                     the publish step on the repo variable of the same name).
-#      REPOS_PREFIX (default empty) — optional key prefix inside the bucket.
+# Env: REPOS_BUCKET  — S3 bucket backing repos.tacitsoft.dev (required).
+#      APK_BRANCH    (default v3.20) / APK_COMPONENT (default main)
 #
-# LINEAGE-FIRST layout (dagobah-infra#305 / SDD-305): packages publish to shared
-# lineage roots at the bucket root — /apt, /rpm, /apk, /releases, /keys — NOT
-# under a /wmaker-ng/ product prefix. The product is selected by package name,
-# not by a path segment (HashiCorp/Grafana/Docker model).
+# INCOMING MODEL (dagobah-infra#306, SDD-305 §5): this producer does NOT write
+# shared repo metadata and holds NO signing keys. It stages packages into the
+# _incoming/ contract shape and uploads them; the infra-owned repo-indexer —
+# the single writer — folds them into the shared pool, rebuilds and signs all
+# indices (including rpm --addsign), and publishes the lineage roots.
 #
-# SINGLE-PRODUCER BRIDGE: while wmaker-ng is the only producer it may write the
-# shared lineage roots directly. `aws s3 sync --delete` is scoped PER-LINEAGE
-# (never the bucket root) so keys/ and index.html are never pruned. Once a
-# SECOND producer (e.g. tsctl) shares the pool, this must move to the
-# infra-owned _incoming/ + repo-indexer model — a producer's --delete would
-# otherwise prune the other producer's packages from the shared apt pool /
-# rpm repodata.
+#   _incoming/wmaker-ng/apt/<pkg>_<ver>_<arch>.deb          (flat; pooled)
+#   _incoming/wmaker-ng/rpm/el/<major>/<basearch>/<pkg>.rpm
+#   _incoming/wmaker-ng/apk/<branch>/<component>/<arch>/<pkg>.apk
 #
-# reprepro's conf/ + db/ working state is excluded — only dists/ + pool/ ship.
-# CloudFront (OAC) fronts the private bucket; CI reaches it with `aws s3 sync`
-# under the release OIDC role (no SSH host, no deploy key).
+# The releases/ lineage is product-scoped (no shared metadata), so it is
+# synced directly to releases/wmaker-ng/ — additive only, never --delete.
+# The IAM grant covers exactly these two prefixes (wmaker_ng_publish_mode =
+# "incoming" in dagobah-infra prod).
 # ============================================================================
 set -euo pipefail
 
-REPO_DIR="${1:?usage: publish.sh <repo-dir>}"
-REPOS_BUCKET="${REPOS_BUCKET:?REPOS_BUCKET not set — infra has not activated the repo bucket yet}"
-REPOS_PREFIX="${REPOS_PREFIX:-}"
+PKG_DIR="${1:?usage: publish.sh <pkg-dir> <releases-dir>}"
+RELEASES_DIR="${2:?usage: publish.sh <pkg-dir> <releases-dir>}"
+REPOS_BUCKET="${REPOS_BUCKET:?REPOS_BUCKET not set}"
+APK_BRANCH="${APK_BRANCH:-v3.20}"
+APK_COMPONENT="${APK_COMPONENT:-main}"
 
-[[ -d "$REPO_DIR" ]] || {
-	echo "error: repo dir not found: $REPO_DIR" >&2
-	exit 1
-}
-
-# Normalise an optional prefix to "" or "<prefix>/".
-dest_base="s3://$REPOS_BUCKET/${REPOS_PREFIX:+$REPOS_PREFIX/}"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
 
 shopt -s nullglob
-for lineage_dir in "$REPO_DIR"/*/; do
-	lineage="$(basename "$lineage_dir")"
-	case "$lineage" in
-	keys)
-		# Trust anchors are shared across all producers — never prune them.
-		echo "==> publishing keys → ${dest_base}keys/ (no --delete)" >&2
-		aws s3 sync --no-progress "$lineage_dir" "${dest_base}keys/"
-		;;
+
+# apt: flat — the indexer's reprepro pools them.
+debs=("$PKG_DIR"/*.deb)
+if [[ ${#debs[@]} -gt 0 ]]; then
+	mkdir -p "$STAGE/apt"
+	cp -f "${debs[@]}" "$STAGE/apt/"
+fi
+
+# rpm: el/<major>/<basearch>/ per the incoming contract (arch from filename).
+for rpm in "$PKG_DIR"/*.el*.rpm; do
+	base="$(basename "$rpm")"
+	major="${base##*.el}"
+	major="${major%%.*}"
+	case "$base" in
+	*.x86_64.rpm) arch=x86_64 ;;
+	*.aarch64.rpm) arch=aarch64 ;;
+	*.noarch.rpm) arch=noarch ;;
 	*)
-		# Per-lineage --delete confines pruning to this producer's own lineage
-		# tree; --exclude drops reprepro's private conf/ + db/ working state.
-		echo "==> publishing $lineage → ${dest_base}${lineage}/" >&2
-		aws s3 sync --delete --no-progress \
-			--exclude "conf/*" --exclude "db/*" \
-			"$lineage_dir" "${dest_base}${lineage}/"
+		echo "error: cannot determine arch of $base" >&2
+		exit 1
 		;;
 	esac
+	mkdir -p "$STAGE/rpm/el/$major/$arch"
+	cp -f "$rpm" "$STAGE/rpm/el/$major/$arch/"
 done
-echo "==> published" >&2
+
+# apk: <branch>/<component>/<arch>/ (arch suffix match — version strings and
+# x86_64 both contain underscores, so never split on '_').
+for apk in "$PKG_DIR"/*.apk; do
+	case "$apk" in
+	*_x86_64.apk) arch=x86_64 ;;
+	*_aarch64.apk) arch=aarch64 ;;
+	*)
+		echo "error: cannot determine arch of $(basename "$apk")" >&2
+		exit 1
+		;;
+	esac
+	mkdir -p "$STAGE/apk/$APK_BRANCH/$APK_COMPONENT/$arch"
+	cp -f "$apk" "$STAGE/apk/$APK_BRANCH/$APK_COMPONENT/$arch/"
+done
+
+echo "==> handing off packages → s3://$REPOS_BUCKET/_incoming/wmaker-ng/" >&2
+aws s3 sync --no-progress "$STAGE/" "s3://$REPOS_BUCKET/_incoming/wmaker-ng/"
+
+if [[ -d "$RELEASES_DIR" ]]; then
+	echo "==> publishing releases → s3://$REPOS_BUCKET/releases/wmaker-ng/ (additive)" >&2
+	aws s3 sync --no-progress "$RELEASES_DIR/" "s3://$REPOS_BUCKET/releases/wmaker-ng/"
+fi
+
+echo "==> handoff complete — the repo-indexer sweeps hourly; for immediacy:" >&2
+echo "    gh workflow run repo-indexer.yml -R tacitness/dagobah-infra" >&2
