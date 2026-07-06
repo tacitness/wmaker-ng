@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "wmaker-desktop": {
+      "args": [],
+      "command": "ai-mcp",
+      "type": "stdio"
+    }
+  }
+}

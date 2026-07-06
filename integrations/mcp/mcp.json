@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wmaker-desktop": {
+      "args": [],
+      "command": "ai-mcp"
+    }
+  }
+}

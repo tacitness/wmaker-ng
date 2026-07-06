@@ -71,4 +71,18 @@ for bin in ai-mcp ng-automount ng-notify ng-power; do
 	fi
 done
 
+# MCP client config + agent guidance (also emitted by `ai-mcp print-config`).
+if [ -d "$stage/integrations" ]; then
+	share="$PREFIX/share/wmaker-ai/integrations"
+	find "$stage/integrations" -type f | while IFS= read -r f; do
+		rel="${f#"$stage/integrations/"}"
+		install -d "$share/$(dirname "$rel")"
+		case "$rel" in
+		*install-agents-md.sh) install -m 0755 "$f" "$share/$rel" ;;
+		*) install -m 0644 "$f" "$share/$rel" ;;
+		esac
+	done
+	echo "wmaker-ai integrations installed into $share"
+fi
+
 echo "wmaker-ng $VERSION installed into $PREFIX/bin"

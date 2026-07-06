@@ -155,6 +155,20 @@ Then register it with any MCP client. Claude Code, for example:
 claude mcp add wmaker-desktop -- ai-mcp
 ```
 
+For other clients (Claude Desktop, Cursor, VS Code, Windsurf, Zed …), `ai-mcp`
+emits its own config — no hand-copying:
+
+```bash
+ai-mcp print-config                 # mcpServers shape → .mcp.json / Cursor / Claude Desktop
+ai-mcp print-config --client vscode > .vscode/mcp.json
+```
+
+Drop-in config fragments live in [integrations/](integrations/), and the full
+per-client walkthrough + tool surface is in
+[docs/mcp-clients.md](docs/mcp-clients.md). There is also an appendable
+`AGENTS.md` block (`ai-mcp print-agents-md`) that teaches an agent how to drive
+the desktop well.
+
 The model gets `list_windows` / `focus` / `move_resize` / `tile` /
 `move_mouse` / `click` / `type` / `key` / `screenshot` / `desktop_scene` —
 full observe-and-act on the live desktop. The window manager never learns it

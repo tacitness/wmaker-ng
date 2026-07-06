@@ -39,4 +39,11 @@ src_install() {
 
 	dobin "${stage}"/ai-mcp
 	dodoc "${stage}"/README.md "${stage}"/ARCHITECTURE.md
+
+	# MCP client config + agent guidance (also emitted by `ai-mcp print-config`).
+	if [[ -d "${stage}/integrations" ]]; then
+		insinto /usr/share/wmaker-ai/integrations
+		doins -r "${stage}"/integrations/.
+		fperms 0755 /usr/share/wmaker-ai/integrations/agents/install-agents-md.sh
+	fi
 }

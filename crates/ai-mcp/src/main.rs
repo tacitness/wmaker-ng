@@ -7,6 +7,7 @@
 //! Window Maker desktop; the WM never learns it is being driven.
 
 mod command;
+mod config;
 
 use std::fs;
 use std::io::{Read, Write};
@@ -1996,6 +1997,13 @@ async fn main() -> anyhow::Result<()> {
     if args.first().is_some_and(|arg| arg == "route-command") {
         return run_route_command_cli(&args[1..]);
     }
+    if args.first().is_some_and(|arg| arg == "print-config") {
+        return run_print_config_cli(&args[1..]);
+    }
+    if args.first().is_some_and(|arg| arg == "print-agents-md") {
+        print!("{}", config::AGENTS_MD);
+        return Ok(());
+    }
     if args.iter().any(|arg| arg == "--check") {
         check_runtime()?;
         return Ok(());
@@ -2107,6 +2115,72 @@ fn print_route_command_help() {
         "Usage: ai-mcp route-command [--dry-run] [--source transcript_fixture|push_to_talk_asr|typed|model_plan|skill_replay] --text TEXT\n\n\
          Parses a short command fixture without connecting to X. Use this for\n\
          CI and non-audio transcript tests; live ASR feeds the same router later."
+    );
+}
+
+/// Emit an MCP client config for stdout redirection into a client's config file
+/// (e.g. `ai-mcp print-config > .mcp.json`). Does not connect to X.
+fn run_print_config_cli(args: &[String]) -> anyhow::Result<()> {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_print_config_help();
+        return Ok(());
+    }
+    let mut shape = config::ClientShape::McpServers;
+    let mut sandbox = false;
+    let mut absolute = false;
+    let mut name: Option<String> = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--client" => {
+                i += 1;
+                shape = match args.get(i).map(String::as_str) {
+                    // The mcpServers shape is shared across most clients.
+                    Some(
+                        "claude" | "claude-code" | "claude-desktop" | "cursor" | "windsurf"
+                        | "cline" | "zed" | "mcpservers" | "mcp",
+                    ) => config::ClientShape::McpServers,
+                    Some("vscode" | "code") => config::ClientShape::VsCode,
+                    Some(other) => anyhow::bail!("unknown --client: {other}"),
+                    None => anyhow::bail!("--client requires a value"),
+                };
+            }
+            "--name" => {
+                i += 1;
+                name = Some(
+                    args.get(i)
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("--name requires a value"))?,
+                );
+            }
+            "--sandbox" => sandbox = true,
+            "--absolute" => absolute = true,
+            other => anyhow::bail!("unknown print-config argument: {other}"),
+        }
+        i += 1;
+    }
+
+    let resolved = if absolute {
+        Some(std::env::current_exe()?.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+    let name = name.unwrap_or_else(|| config::default_name(sandbox).to_string());
+    print!(
+        "{}",
+        config::render_config(shape, sandbox, &name, resolved.as_deref())
+    );
+    Ok(())
+}
+
+fn print_print_config_help() {
+    eprintln!(
+        "Usage: ai-mcp print-config [--client claude|cursor|vscode] [--sandbox] [--absolute] [--name NAME]\n\n\
+         Emits an MCP client config on stdout; redirect it into your client's config\n\
+         file, e.g. `ai-mcp print-config > .mcp.json`. Defaults to the mcpServers\n\
+         shape and the native (ai-mcp on PATH) server. --sandbox emits the Docker\n\
+         `wmaker-ai-sandbox` server; --absolute writes the resolved ai-mcp path\n\
+         instead of \"ai-mcp\". Does not connect to X."
     );
 }
 
