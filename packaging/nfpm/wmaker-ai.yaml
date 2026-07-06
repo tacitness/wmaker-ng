@@ -37,8 +37,43 @@ contents:
     type: tree
     file_info:
       mode: 0644
+  # MCP client config + agent guidance (also emitted by `ai-mcp print-config`).
+  # Enumerated rather than one tree so the installer stays 0755 without a
+  # dst collision against a 0644 tree entry.
+  - src: ./integrations/README.md
+    dst: /usr/share/wmaker-ai/integrations/README.md
+    file_info:
+      mode: 0644
+  - src: ./integrations/mcp/mcp.json
+    dst: /usr/share/wmaker-ai/integrations/mcp/mcp.json
+    file_info:
+      mode: 0644
+  - src: ./integrations/mcp/mcp.sandbox.json
+    dst: /usr/share/wmaker-ai/integrations/mcp/mcp.sandbox.json
+    file_info:
+      mode: 0644
+  - src: ./integrations/mcp/vscode-mcp.json
+    dst: /usr/share/wmaker-ai/integrations/mcp/vscode-mcp.json
+    file_info:
+      mode: 0644
+  - src: ./integrations/agents/AGENTS.wmaker-ai.md
+    dst: /usr/share/wmaker-ai/integrations/agents/AGENTS.wmaker-ai.md
+    file_info:
+      mode: 0644
+  - src: ./integrations/agents/AGENTS.wmaker-ai.md.patch
+    dst: /usr/share/wmaker-ai/integrations/agents/AGENTS.wmaker-ai.md.patch
+    file_info:
+      mode: 0644
+  - src: ./integrations/agents/install-agents-md.sh
+    dst: /usr/share/wmaker-ai/integrations/agents/install-agents-md.sh
+    file_info:
+      mode: 0755
   - src: ./docs/voice-command-control.md
     dst: /usr/share/doc/wmaker-ai/voice-command-control.md
+    file_info:
+      mode: 0644
+  - src: ./docs/mcp-clients.md
+    dst: /usr/share/doc/wmaker-ai/mcp-clients.md
     file_info:
       mode: 0644
 

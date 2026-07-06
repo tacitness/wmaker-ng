@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "wmaker-sandbox": {
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "wmaker-ai-sandbox"
+      ],
+      "command": "docker"
+    }
+  }
+}

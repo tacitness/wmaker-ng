@@ -37,6 +37,10 @@ cp "$STAGE_DIR"/* "$stagetmp/$name/"
 for doc in README.md ARCHITECTURE.md ROADMAP.md; do
 	[[ -f "$ROOT_DIR/$doc" ]] && cp "$ROOT_DIR/$doc" "$stagetmp/$name/"
 done
+# MCP client config + agent guidance, consumed by the AUR/Gentoo/static channels.
+if [[ -d "$ROOT_DIR/integrations" ]]; then
+	cp -R "$ROOT_DIR/integrations" "$stagetmp/$name/integrations"
+fi
 
 tar -C "$stagetmp" -czf "$OUT_DIR/$name.tar.gz" "$name"
 (cd "$OUT_DIR" && sha256sum "$name.tar.gz" >"$name.tar.gz.sha256")

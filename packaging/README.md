@@ -29,7 +29,10 @@ systemd/systemd-user units yet:
 - `wmaker-ng` ships `ng-automount`, `ng-power`, and `ng-notify` as opt-in
   developer tools until their D-Bus reactors are real.
 - `wmaker-ai` ships `ai-mcp` as a stdio MCP server that the driving agent starts
-  on the target `DISPLAY`.
+  on the target `DISPLAY`, plus MCP client config + agent guidance under
+  `/usr/share/wmaker-ai/integrations/` (source: [`../integrations/`](../integrations/),
+  also emitted by `ai-mcp print-config` / `print-agents-md`). The AUR, Gentoo,
+  and static-tarball channels carry the same tree.
 
 This keeps a daily-driver install reversible and idle-clean: no background
 daemon starts just because the package was installed.

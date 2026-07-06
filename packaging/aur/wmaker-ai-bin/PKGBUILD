@@ -23,4 +23,17 @@ package() {
   install -Dm0755 "${srcdir}/${stage}/ai-mcp" "${pkgdir}/usr/bin/ai-mcp"
   install -Dm0644 "${srcdir}/${stage}/README.md" "${pkgdir}/usr/share/doc/wmaker-ai/README.md"
   install -Dm0644 "${srcdir}/${stage}/ARCHITECTURE.md" "${pkgdir}/usr/share/doc/wmaker-ai/ARCHITECTURE.md"
+
+  # MCP client config + agent guidance (also emitted by `ai-mcp print-config`).
+  if [[ -d "${srcdir}/${stage}/integrations" ]]; then
+    local rel dst
+    while IFS= read -r -d '' rel; do
+      dst="${pkgdir}/usr/share/wmaker-ai/integrations/${rel#"${srcdir}/${stage}/integrations/"}"
+      if [[ "${rel}" == *install-agents-md.sh ]]; then
+        install -Dm0755 "${rel}" "${dst}"
+      else
+        install -Dm0644 "${rel}" "${dst}"
+      fi
+    done < <(find "${srcdir}/${stage}/integrations" -type f -print0)
+  fi
 }
