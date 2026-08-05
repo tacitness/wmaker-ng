@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec firefox --new-window "${1:-about:blank}"

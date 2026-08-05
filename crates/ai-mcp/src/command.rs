@@ -496,6 +496,7 @@ fn resolve_launch_alias(app: &str) -> (String, Vec<String>) {
         "terminal" | "shell" | "console" => ("wmaker-open-terminal".to_string(), Vec::new()),
         "browser" | "web" | "brave" => ("wmaker-open-browser".to_string(), Vec::new()),
         "chrome" | "chromium" => ("wmaker-open-chrome".to_string(), Vec::new()),
+        "firefox" => ("wmaker-open-firefox".to_string(), Vec::new()),
         "blender" => ("wmaker-open-blender".to_string(), Vec::new()),
         "libreoffice" | "office" | "writer" => ("wmaker-open-libreoffice".to_string(), Vec::new()),
         "gimp" => ("wmaker-open-gimp".to_string(), Vec::new()),
@@ -624,6 +625,27 @@ mod tests {
         match routed.action {
             PlannedAction::LaunchApp { command, args } => {
                 assert_eq!(command, "wmaker-open-terminal");
+                assert!(args.is_empty());
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn routes_open_firefox_to_deterministic_launcher() {
+        let routed = route(&RouteCommandParams {
+            text: "open firefox".to_string(),
+            source: CommandSource::Typed,
+            confidence: None,
+            dry_run: true,
+            confirmed: false,
+            wait_ms: None,
+        });
+
+        assert!(matches!(routed.intent, CommandIntent::OpenApp));
+        match routed.action {
+            PlannedAction::LaunchApp { command, args } => {
+                assert_eq!(command, "wmaker-open-firefox");
                 assert!(args.is_empty());
             }
             other => panic!("unexpected action: {other:?}"),

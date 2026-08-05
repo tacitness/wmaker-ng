@@ -13,17 +13,17 @@ wmaker-crm:headless
 It keeps the lightweight sandbox/browser images unchanged at rest while adding:
 
 - terminal: `xfce4-terminal` with `xterm` fallback
-- browsers: existing Brave plus guaranteed `chromium`
+- browsers: existing Brave plus guaranteed Chromium and Mozilla Firefox
 - content tools: Blender, LibreOffice, GIMP, Inkscape, FFmpeg, ImageMagick
 - session plumbing: `xdg-utils`, `dbus-x11`, AT-SPI runtime, fonts, MIME data
 - deterministic launchers: `wmaker-open-terminal`, `wmaker-open-browser`,
-  `wmaker-open-chrome`, `wmaker-open-blender`,
+  `wmaker-open-chrome`, `wmaker-open-firefox`, `wmaker-open-blender`,
   `wmaker-open-libreoffice`, `wmaker-open-gimp`,
   `wmaker-open-inkscape`
 
-Firefox is intentionally omitted in this profile today. Ubuntu Noble's archive
-package is a Snap stub, and this profile only accepts deterministic non-Snap
-browser installs.
+Firefox comes from Mozilla's signed APT repository, with the repository key
+fingerprint verified during the build. This avoids Ubuntu Noble's Snap
+transition package while retaining a deterministic non-Snap install.
 
 ## Build
 
@@ -81,7 +81,7 @@ The smoke proves:
 
 - `open terminal` resolves through the deterministic launcher path
 - terminal startup writes a nonce from the launched shell session
-- Brave, Chromium, Blender, LibreOffice, GIMP, and Inkscape open visible windows
+- Brave, Chromium, Firefox, Blender, LibreOffice, GIMP, and Inkscape open visible windows
 - Blender background render produces bounded artifacts
 - FFmpeg/ImageMagick transform a bounded fixture
 - AT-SPI returns a non-empty accessibility tree

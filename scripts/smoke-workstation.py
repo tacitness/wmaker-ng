@@ -289,6 +289,14 @@ def main():
                 "chromium",
             )
 
+            firefox_result = route_command(mcp, "open firefox")
+            firefox_window = wait_for_window(
+                mcp,
+                lambda window: "firefox" in lower_window_fields(window),
+                args.timeout,
+                "firefox",
+            )
+
             blender_result = route_command(mcp, "open blender", wait_ms=2500)
             blender_window = wait_for_window(
                 mcp,
@@ -352,6 +360,10 @@ def main():
                 "chromium": {
                     "result_status": chrome_result["result"]["status"],
                     "title": chrome_window.get("title"),
+                },
+                "firefox": {
+                    "result_status": firefox_result["result"]["status"],
+                    "title": firefox_window.get("title"),
                 },
                 "blender": {
                     "result_status": blender_result["result"]["status"],

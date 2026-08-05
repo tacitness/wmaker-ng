@@ -15,6 +15,19 @@ LABEL org.opencontainers.image.source="https://github.com/tacitness/wmaker-ng"
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl ca-certificates gnupg; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    curl -fsSLo /etc/apt/keyrings/packages.mozilla.org.asc \
+        https://packages.mozilla.org/apt/repo-signing-key.gpg; \
+    test "$(gpg --show-keys --with-colons /etc/apt/keyrings/packages.mozilla.org.asc \
+        | awk -F: '$1 == "fpr" { print $10; exit }')" = \
+        "35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3"; \
+    echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
+        > /etc/apt/sources.list.d/mozilla.list; \
+    printf '%s\n' \
+        'Package: *' \
+        'Pin: origin packages.mozilla.org' \
+        'Pin-Priority: 1000' \
+        > /etc/apt/preferences.d/mozilla; \
     curl -fsSLo /tmp/xtradeb.asc \
         https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0x5301fa4fd93244fbc6f6149982bb6851c64f6880; \
     gpg --batch --dearmor --output /usr/share/keyrings/xtradeb.gpg /tmp/xtradeb.asc; \
@@ -24,6 +37,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         chromium \
+        firefox \
         xfce4-terminal \
         xterm \
         blender \
