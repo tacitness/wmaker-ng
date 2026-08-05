@@ -214,6 +214,10 @@ sandbox-workstation-vnc-image: ## Build thin supervised-VNC overlay on an existi
 	docker build -f $(ROOT_DIR)/sandbox/workstation-vnc/Dockerfile -t wmaker-ai-workstation-vnc $(ROOT_DIR)
 	@echo "Built wmaker-ai-workstation-vnc (base: wmaker-ai-workstation)"
 
+.PHONY: smoke-workstation-vnc
+smoke-workstation-vnc: ## Smoke the supervised VNC overlay and its HTTP MCP bridge
+	python3 scripts/smoke-workstation-vnc.py
+
 # ── Release (tag-only versioning) ─────────────────────────────────────────────
 _VER_MAJOR := $(shell echo $(_BASE_VER) | cut -d. -f1)
 _VER_MINOR := $(shell echo $(_BASE_VER) | cut -d. -f2)

@@ -14,7 +14,7 @@ Current first-party release lanes:
 | Static | GNU + musl tarballs | checksums and static channel manifest |
 | AUR | `wmaker-ng-bin`, `wmaker-ai-bin` | `.SRCINFO`/PKGBUILD freshness |
 | Helm | `charts/wmaker-ng` | lint/render for sandbox/browser/workstation/gpu profiles |
-| OCI | `wmaker-ai-sandbox`, `wmaker-ai-browser`, `wmaker-ai-workstation` | anonymous `docker run` smoke |
+| OCI | `wmaker-ai-sandbox`, `wmaker-ai-browser`, `wmaker-ai-workstation`, `wmaker-ai-workstation-vnc` | anonymous `docker run` smoke |
 
 Deferred downstream lanes:
 
