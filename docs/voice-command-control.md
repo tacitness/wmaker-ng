@@ -12,7 +12,12 @@ unknown commands return `ask_clarification` instead of guessing.
 Supported fixture commands:
 
 - `open browser to example dot com`
+- `open terminal`
+- `open chrome`
 - `open blender`
+- `open libreoffice`
+- `open gimp`
+- `open inkscape`
 - `focus window 0x1234`
 - `move window left`
 - `move window right`

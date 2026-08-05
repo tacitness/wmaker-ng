@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=WMaker GIMP
+Exec=wmaker-open-gimp
+Terminal=false
+Categories=Graphics;RasterGraphics;
+StartupNotify=true

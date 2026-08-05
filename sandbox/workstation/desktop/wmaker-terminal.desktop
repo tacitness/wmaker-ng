@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=WMaker Terminal
+Exec=wmaker-open-terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupNotify=true

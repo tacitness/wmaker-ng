@@ -69,7 +69,11 @@ class Mcp:
                     raise RuntimeError("ai-mcp exited: " + self._stderr())
                 continue
             line = self.proc.stdout.readline()
-            if not line or not line.strip():
+            if not line:
+                if self.proc.poll() is not None:
+                    raise RuntimeError("ai-mcp exited: " + self._stderr())
+                continue
+            if not line.strip():
                 continue
             try:
                 msg = json.loads(line)

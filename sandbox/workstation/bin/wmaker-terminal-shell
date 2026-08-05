@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${WMAKER_TERMINAL_NONCE:-}" ]; then
+    printf '%s\n' "$WMAKER_TERMINAL_NONCE"
+    if [ -n "${WMAKER_TERMINAL_NONCE_FILE:-}" ]; then
+        mkdir -p "$(dirname "$WMAKER_TERMINAL_NONCE_FILE")"
+        printf '%s\n' "$WMAKER_TERMINAL_NONCE" >"$WMAKER_TERMINAL_NONCE_FILE"
+    fi
+fi
+
+exec "${SHELL:-/bin/sh}"

@@ -3,8 +3,8 @@
   "id": "browser.managed",
   "status": "trusted",
   "display_name": "Managed browser",
-  "launch_aliases": ["browser", "firefox", "web"],
-  "operations": ["open_url", "summarize_controls"],
+  "launch_aliases": ["browser", "brave", "chrome", "web"],
+  "operations": ["open_url", "open_chromium", "summarize_controls"],
   "control_surfaces": ["desktop-entry-or-executable", "browser-native-messaging", "x11-input-fallback"],
   "observation_adapters": ["browser_native_messaging", "observe"],
   "provenance": "wmaker-ng seed skill"

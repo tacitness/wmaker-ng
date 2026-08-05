@@ -13,8 +13,8 @@ Current first-party release lanes:
 | APK | Alpine musl static lane | apk index/signing smoke |
 | Static | GNU + musl tarballs | checksums and static channel manifest |
 | AUR | `wmaker-ng-bin`, `wmaker-ai-bin` | `.SRCINFO`/PKGBUILD freshness |
-| Helm | `charts/wmaker-ng` | lint/render for sandbox/browser/gpu profiles |
-| OCI | `wmaker-ai-sandbox`, `wmaker-ai-browser` | anonymous `docker run` smoke |
+| Helm | `charts/wmaker-ng` | lint/render for sandbox/browser/workstation/gpu profiles |
+| OCI | `wmaker-ai-sandbox`, `wmaker-ai-browser`, `wmaker-ai-workstation` | anonymous `docker run` smoke |
 
 Deferred downstream lanes:
 

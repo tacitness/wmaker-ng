@@ -10,7 +10,7 @@ paths=(
 	packaging/aur/wmaker-ai-bin/PKGBUILD
 	packaging/gentoo/x11-wm/wmaker-ng/wmaker-ng-0.1.0.ebuild
 	packaging/gentoo/x11-wm/wmaker-ai/wmaker-ai-0.1.0.ebuild
-	packaging/repo/wmaker-ng.repo
+	packaging/repo/tacitsoft.repo
 	charts/wmaker-ng/Chart.yaml
 	scripts/check-helm-chart.sh
 )
@@ -25,4 +25,5 @@ done
 grep -q 'el8' Makefile
 grep -q 'el9' Makefile
 grep -q 'wmaker-ai-sandbox' sandbox/README.md
+grep -q 'wmaker-ai-workstation' docs/release-package-matrix.md
 echo "release matrix shape check passed"

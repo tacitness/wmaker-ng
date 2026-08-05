@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=WMaker Chromium Browser
+Exec=wmaker-open-chrome
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true

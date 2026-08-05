@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Firefox
+Exec=wmaker-open-firefox
+Icon=firefox
+Categories=Network;WebBrowser;
+Terminal=false

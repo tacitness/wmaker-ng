@@ -204,6 +204,11 @@ sandbox-browser-image: sandbox-image ## Build wmaker-ai-browser (Brave+Chromium 
 	docker build -t wmaker-ai-browser $(ROOT_DIR)/sandbox/browser
 	@echo "Built wmaker-ai-browser (base: wmaker-ai-sandbox)"
 
+.PHONY: sandbox-workstation-image
+sandbox-workstation-image: sandbox-browser-image ## Build wmaker-ai-workstation (browser + terminal + content tools, #90)
+	docker build -f $(ROOT_DIR)/sandbox/workstation/Dockerfile -t wmaker-ai-workstation $(ROOT_DIR)
+	@echo "Built wmaker-ai-workstation (base: wmaker-ai-browser)"
+
 # ── Release (tag-only versioning) ─────────────────────────────────────────────
 _VER_MAJOR := $(shell echo $(_BASE_VER) | cut -d. -f1)
 _VER_MINOR := $(shell echo $(_BASE_VER) | cut -d. -f2)
