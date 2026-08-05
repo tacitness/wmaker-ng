@@ -142,6 +142,7 @@ def run_media_checks(image, workspace_dir):
 
 def run_persistence_checks(image, profile_dir, workspace_dir):
     browser_marker = os.path.join(profile_dir, "wmaker-browser-marker.txt")
+    firefox_profile_dir = os.path.join(profile_dir, "firefox")
     terminalrc = os.path.join(
         workspace_dir, "home", ".config", "xfce4", "terminal", "terminalrc"
     )
@@ -154,6 +155,7 @@ def run_persistence_checks(image, profile_dir, workspace_dir):
     verify_cmd = (
         "test -f /profile/wmaker-browser-marker.txt "
         "&& grep -q browser-marker /profile/wmaker-browser-marker.txt "
+        "&& test -d /profile/firefox "
         "&& test -f \"$HOME/.config/xfce4/terminal/terminalrc\" "
         "&& grep -q ColorBackground \"$HOME/.config/xfce4/terminal/terminalrc\""
     )
@@ -177,6 +179,7 @@ def run_persistence_checks(image, profile_dir, workspace_dir):
     docker_capture(base_argv + [verify_cmd])
     return {
         "browser_marker": browser_marker,
+        "firefox_profile_dir": firefox_profile_dir,
         "terminalrc": terminalrc,
     }
 

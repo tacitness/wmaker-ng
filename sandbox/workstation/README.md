@@ -33,7 +33,8 @@ make sandbox-workstation-image
 
 ## Mount contract
 
-- `/profile`: browser-only identity/profile state for Brave/Chromium.
+- `/profile`: browser-only identity/profile state for Brave, Chromium, and
+  Firefox (`/profile/firefox`).
 - `/workspace`: writable home/artifact mount for application settings and user
   outputs.
 - `/workspace/home`: exported as `HOME`, with `XDG_CONFIG_HOME`,
@@ -45,8 +46,9 @@ browser instance left stale `Singleton*` locks behind, use `CLEAR_SINGLETON=1`
 only when the original browser is known to be stopped.
 
 In Kubernetes, keep `/profile` and `/workspace` on separate claims. `/profile`
-is single-writer browser identity state; `/workspace` is the writable home and
-artifact lane for terminal, office, image, and render tools.
+is single-writer browser identity state for Brave/Chromium/Firefox; `/workspace`
+is the writable home and artifact lane for terminal, office, image, and render
+tools.
 
 ## Runtime envelope
 

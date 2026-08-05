@@ -1,4 +1,8 @@
 #!/bin/sh
 set -eu
 
-exec firefox --new-window "${1:-about:blank}"
+: "${FIREFOX_PROFILE_DIR:=/profile/firefox}"
+
+mkdir -p "$FIREFOX_PROFILE_DIR"
+
+exec firefox --profile "$FIREFOX_PROFILE_DIR" --new-window "${1:-about:blank}"
