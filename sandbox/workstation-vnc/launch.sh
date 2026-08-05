@@ -22,6 +22,12 @@ x11vnc \
     -noxdamage \
     -o /tmp/x11vnc.log &
 
-# The Kubernetes workload uses a network MCP bridge, so no stdio client is
-# attached to this container. Keep the inherited MCP process and desktop alive.
-tail -f /dev/null | /usr/local/bin/wmaker-ai-workstation
+# Keep the network bridge and its stdio child in the workstation container.
+# App launch commands must share the workstation filesystem; a lightweight
+# sidecar can observe X11, but cannot execute Blender or browser launchers.
+exec /opt/mcp-proxy/bin/mcp-proxy \
+    --host 0.0.0.0 \
+    --port "${MCP_PORT:-8090}" \
+    --pass-environment \
+    -- \
+    /usr/local/bin/wmaker-ai-workstation

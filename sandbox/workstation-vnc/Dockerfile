@@ -5,7 +5,10 @@ LABEL org.opencontainers.image.description="Supervised VNC overlay for wmaker-ai
 LABEL org.opencontainers.image.source="https://github.com/tacitness/wmaker-ng"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends x11vnc \
+    && apt-get install -y --no-install-recommends python3-venv x11vnc \
+    && python3 -m venv /opt/mcp-proxy \
+    && /opt/mcp-proxy/bin/pip install --no-cache-dir \
+        mcp-proxy==0.12.0 mcp==1.27.1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY sandbox/workstation-vnc/launch.sh /usr/local/bin/wmaker-ai-workstation-vnc

@@ -20,7 +20,9 @@ Workstation chart contract:
 - `/workspace` is a separate writable PVC for app state and artifacts
 - the optional `wmaker-ai-workstation-vnc` overlay requires
   `VNC_PASSWORD_FILE`, exposes the existing X display through `x11vnc` on port
-  5900, and leaves the base workstation's normal stdin MCP contract unchanged
+  5900, and exposes its co-located streamable-HTTP MCP bridge on port 8090 so
+  routed app launches execute in the workstation filesystem; the base
+  workstation's normal stdin MCP contract remains unchanged
 - the workstation values file raises requests/limits to `2/6` vCPU,
   `4/12Gi` memory, and `8/16Gi` ephemeral storage
 
