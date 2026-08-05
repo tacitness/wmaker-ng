@@ -209,6 +209,11 @@ sandbox-workstation-image: sandbox-browser-image ## Build wmaker-ai-workstation 
 	docker build -f $(ROOT_DIR)/sandbox/workstation/Dockerfile -t wmaker-ai-workstation $(ROOT_DIR)
 	@echo "Built wmaker-ai-workstation (base: wmaker-ai-browser)"
 
+.PHONY: sandbox-workstation-vnc-image
+sandbox-workstation-vnc-image: ## Build thin supervised-VNC overlay on an existing wmaker-ai-workstation
+	docker build -f $(ROOT_DIR)/sandbox/workstation-vnc/Dockerfile -t wmaker-ai-workstation-vnc $(ROOT_DIR)
+	@echo "Built wmaker-ai-workstation-vnc (base: wmaker-ai-workstation)"
+
 # ── Release (tag-only versioning) ─────────────────────────────────────────────
 _VER_MAJOR := $(shell echo $(_BASE_VER) | cut -d. -f1)
 _VER_MINOR := $(shell echo $(_BASE_VER) | cut -d. -f2)

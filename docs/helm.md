@@ -18,6 +18,9 @@ Workstation chart contract:
 - containers drop all Linux capabilities and disallow privilege escalation
 - `/profile` remains the single-writer browser identity PVC
 - `/workspace` is a separate writable PVC for app state and artifacts
+- the optional `wmaker-ai-workstation-vnc` overlay requires
+  `VNC_PASSWORD_FILE`, exposes the existing X display through `x11vnc` on port
+  5900, and leaves the base workstation's normal stdin MCP contract unchanged
 - the workstation values file raises requests/limits to `2/6` vCPU,
   `4/12Gi` memory, and `8/16Gi` ephemeral storage
 
