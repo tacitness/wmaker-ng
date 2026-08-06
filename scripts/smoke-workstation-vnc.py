@@ -139,6 +139,39 @@ def main():
             if password in logs:
                 raise RuntimeError("VNC password leaked into container logs")
 
+            # Restart the same container so its writable /tmp layer, including
+            # Xvfb runtime artifacts, is retained just like an emptyDir-backed
+            # Kubernetes container restart inside one Pod.
+            docker_capture(["docker", "restart", container])
+            time.sleep(args.startup_wait)
+            if not inspect_running(container):
+                logs, _, _ = docker_capture(["docker", "logs", container], check=False)
+                raise RuntimeError("container exited after restart: {}".format(logs[-4000:]))
+            # Docker may allocate a different host port for an ephemeral
+            # publication when the container is restarted.
+            vnc_port = mapped_port(container, "5900/tcp")
+            mcp_port = mapped_port(container, "8090/tcp")
+            try:
+                wait_for_port("127.0.0.1", vnc_port, args.timeout, "restarted VNC listener")
+                wait_for_port("127.0.0.1", mcp_port, args.timeout, "restarted MCP listener")
+            except TimeoutError as exc:
+                container_logs, _, _ = docker_capture(
+                    ["docker", "logs", container], check=False
+                )
+                vnc_logs, _, _ = docker_capture(
+                    ["docker", "exec", container, "tail", "-80", "/tmp/x11vnc.log"],
+                    check=False,
+                )
+                raise RuntimeError(
+                    "{}\ncontainer logs:\n{}\nx11vnc logs:\n{}".format(
+                        exc, container_logs[-4000:], vnc_logs[-4000:]
+                    )
+                ) from exc
+
+            logs, _, _ = docker_capture(["docker", "logs", container], check=False)
+            if password in logs:
+                raise RuntimeError("VNC password leaked into container logs after restart")
+
             proc_report, _, _ = docker_capture(
                 [
                     "docker",
@@ -161,6 +194,7 @@ def main():
                         "image": args.image,
                         "vnc_port": vnc_port,
                         "mcp_port": mcp_port,
+                        "restart_verified": True,
                         "processes": proc_report.splitlines(),
                     },
                     indent=2,

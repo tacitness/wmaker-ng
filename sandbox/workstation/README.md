@@ -88,6 +88,8 @@ python3 scripts/smoke-workstation.py
 
 The smoke proves:
 
+- the same container restarts with retained `/tmp` X runtime state and restores
+  both its VNC and MCP listeners
 - `open terminal` resolves through the deterministic launcher path
 - terminal startup writes a nonce from the launched shell session
 - Brave, Chromium, Firefox, Blender, LibreOffice, GIMP, and Inkscape open visible windows
