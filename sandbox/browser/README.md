@@ -41,9 +41,10 @@ docker run -i --rm -e START_URL=https://example.com wmaker-ai-browser
 
 | Env / flag        | Default          | Meaning                                       |
 |-------------------|------------------|-----------------------------------------------|
-| `BROWSER`         | `brave-browser`  | browser binary (`brave-browser` \| `chromium`) |
+| `BROWSER`         | `brave-browser`  | browser binary (`brave-browser` \| `chromium` \| `firefox`) |
 | `START_URL`       | `about:blank`    | page opened on boot                           |
-| `USER_DATA_DIR`   | `/profile`       | `--user-data-dir`                             |
+| `USER_DATA_DIR`   | `/profile`       | persistent browser profile root               |
+| `FIREFOX_PROFILE_DIR` | `$USER_DATA_DIR/firefox` | Firefox native `-profile` path       |
 | `DISPOSABLE_PROFILE` | `0`           | if `1`, use a throwaway profile under `/tmp`  |
 | `PROFILE_SEED_TARBALL` | unset       | optional secret-mounted profile seed tarball  |
 | `AUTH_ALLOWED_DOMAINS` | unset       | comma-separated host allowlist for `START_URL` |
@@ -65,6 +66,10 @@ python3 scripts/drive-browser.py \
 
 See [AUTH.md](AUTH.md) for the secrets-managed disposable profile strategy and
 the mounted-seed implementation.
+
+Firefox is selected with its native `-profile` option rather than Chromium's
+unsupported `--user-data-dir` flag. `FIREFOX_PROFILE_DIR` must remain beneath
+`USER_DATA_DIR`, keeping identity state on the intended persistent mount.
 
 ## Notes
 

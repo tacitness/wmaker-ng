@@ -73,6 +73,13 @@ The launcher establishes a session D-Bus, enables AT-SPI for GTK clients, keeps
 browser state on `/profile`, and moves app/home state to `/workspace/home`
 before handing off to `wmaker-ai-browser`.
 
+The workstation entrypoint also removes an Xvfb lock/socket only when its owner
+PID is no longer alive. This makes container restarts safe when Kubernetes keeps
+the Pod's `/tmp` `emptyDir` across restarts. A live X server is never displaced.
+Firefox is pinned to `/profile/firefox` with its native `-profile` selector, so
+image upgrades cannot create a new install-specific profile and hide the
+persisted session.
+
 ## Smoke
 
 ```bash
@@ -81,6 +88,8 @@ python3 scripts/smoke-workstation.py
 
 The smoke proves:
 
+- the same container restarts with retained `/tmp` X runtime state and restores
+  both its VNC and MCP listeners
 - `open terminal` resolves through the deterministic launcher path
 - terminal startup writes a nonce from the launched shell session
 - Brave, Chromium, Firefox, Blender, LibreOffice, GIMP, and Inkscape open visible windows

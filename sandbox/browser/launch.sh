@@ -9,7 +9,9 @@
 # Env:
 #   BROWSER          browser binary (default: brave-browser)
 #   START_URL        page to open on boot (default: about:blank)
-#   USER_DATA_DIR    profile dir / --user-data-dir (default: /profile)
+#   USER_DATA_DIR    persistent browser profile root (default: /profile)
+#   FIREFOX_PROFILE_DIR Firefox profile selected with native -profile
+#                    (default: $USER_DATA_DIR/firefox)
 #   DISPOSABLE_PROFILE if "1", copy/seed into /tmp/profile and discard on exit
 #   PROFILE_SEED_TARBALL optional tar/tar.gz seed mounted from a secret store
 #   AUTH_ALLOWED_DOMAINS optional comma-separated START_URL host allowlist
@@ -48,6 +50,13 @@ fi
 
 if [ "${DISPOSABLE_PROFILE:-0}" = "1" ]; then
 	USER_DATA_DIR=/tmp/wmaker-ai-browser-profile
+	export USER_DATA_DIR
+fi
+
+# Strip trailing slashes (except for /) so the containment check below cannot
+# be bypassed with a sibling path such as /profile-other.
+if [ "$USER_DATA_DIR" != "/" ]; then
+	USER_DATA_DIR=${USER_DATA_DIR%/}
 	export USER_DATA_DIR
 fi
 
@@ -117,20 +126,43 @@ if [ "${WMAKER_AI_BROWSER_ENABLE_ADAPTER:-0}" = "1" ]; then
 	log "browser semantic adapter enabled (extension: $WMAKER_AI_BROWSER_EXTENSION_ID)"
 fi
 
-log "launching $BROWSER on $DISPLAY (profile: $USER_DATA_DIR, url: $START_URL)"
-# Container-appropriate flags: no zygote sandbox (no userns), fixed geometry to
-# match the Xvfb screen, quiet first-run UX.
-"$BROWSER" \
-	--no-sandbox \
-	--no-first-run \
-	--no-default-browser-check \
-	--disable-features=Translate \
-	--user-data-dir="$USER_DATA_DIR" \
-	--window-position=0,0 \
-	--window-size=1280,800 \
-	--start-maximized \
-	$extension_args \
-	"$START_URL" >/tmp/browser.log 2>&1 &
+case "$BROWSER" in
+	*firefox*)
+		: "${FIREFOX_PROFILE_DIR:=$USER_DATA_DIR/firefox}"
+		case "$FIREFOX_PROFILE_DIR" in
+			"$USER_DATA_DIR" | "$USER_DATA_DIR"/*) ;;
+			*)
+				log "FIREFOX_PROFILE_DIR must be inside USER_DATA_DIR"
+				exit 64
+				;;
+		esac
+		mkdir -p "$FIREFOX_PROFILE_DIR"
+		log "launching $BROWSER on $DISPLAY (profile: $FIREFOX_PROFILE_DIR, url: $START_URL)"
+		# Firefox does not implement Chromium's --user-data-dir contract. Using
+		# its native -profile selector prevents a new install identity after an
+		# image upgrade from silently choosing a different profile directory.
+		"$BROWSER" \
+			--no-remote \
+			-profile "$FIREFOX_PROFILE_DIR" \
+			--new-window "$START_URL" >/tmp/browser.log 2>&1 &
+		;;
+	*)
+		log "launching $BROWSER on $DISPLAY (profile: $USER_DATA_DIR, url: $START_URL)"
+		# Container-appropriate Chromium flags: no zygote sandbox (no userns),
+		# fixed geometry matching Xvfb, and quiet first-run UX.
+		"$BROWSER" \
+			--no-sandbox \
+			--no-first-run \
+			--no-default-browser-check \
+			--disable-features=Translate \
+			--user-data-dir="$USER_DATA_DIR" \
+			--window-position=0,0 \
+			--window-size=1280,800 \
+			--start-maximized \
+			$extension_args \
+			"$START_URL" >/tmp/browser.log 2>&1 &
+		;;
+esac
 
 log "exec ai-mcp (MCP over stdio)"
 exec ai-mcp
