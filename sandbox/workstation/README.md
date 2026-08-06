@@ -73,6 +73,13 @@ The launcher establishes a session D-Bus, enables AT-SPI for GTK clients, keeps
 browser state on `/profile`, and moves app/home state to `/workspace/home`
 before handing off to `wmaker-ai-browser`.
 
+The workstation entrypoint also removes an Xvfb lock/socket only when its owner
+PID is no longer alive. This makes container restarts safe when Kubernetes keeps
+the Pod's `/tmp` `emptyDir` across restarts. A live X server is never displaced.
+Firefox is pinned to `/profile/firefox` with its native `-profile` selector, so
+image upgrades cannot create a new install-specific profile and hide the
+persisted session.
+
 ## Smoke
 
 ```bash

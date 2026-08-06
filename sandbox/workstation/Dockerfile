@@ -64,12 +64,13 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY sandbox/workstation/launch.sh /usr/local/bin/wmaker-ai-workstation
+COPY sandbox/workstation/entrypoint.sh /usr/local/bin/wmaker-ai-workstation-entrypoint
 COPY sandbox/workstation/bin/ /usr/local/bin/
 COPY sandbox/workstation/desktop/ /usr/local/share/applications/
 COPY scripts/blender-cylinder.py /usr/share/wmaker-ng/blender-cylinder.py
 
 RUN set -eux; \
-    chmod 0755 /usr/local/bin/wmaker-ai-workstation /usr/local/bin/wmaker-open-* /usr/local/bin/wmaker-terminal-shell; \
+    chmod 0755 /usr/local/bin/wmaker-ai-workstation /usr/local/bin/wmaker-ai-workstation-entrypoint /usr/local/bin/wmaker-open-* /usr/local/bin/wmaker-terminal-shell; \
     chmod 0644 /usr/local/share/applications/*.desktop; \
     update-desktop-database /usr/local/share/applications || true
 
@@ -80,4 +81,5 @@ ENV BROWSER=brave-browser \
     WORKSPACE_HOME=/workspace/home \
     WMAKER_TERMINAL_TITLE="wmaker terminal"
 
+ENTRYPOINT ["/usr/local/bin/wmaker-ai-workstation-entrypoint"]
 CMD ["wmaker-ai-workstation"]

@@ -62,6 +62,10 @@ mcp-smoke: ## Smoke-test ai-mcp against DISPLAY (default :9)
 m7-command-smoke: ## Smoke-test the no-audio command fixture router
 	scripts/m7-command-fixture-smoke.sh
 
+.PHONY: workstation-contract-check
+workstation-contract-check: ## Verify restart recovery and browser profile contracts
+	python3 scripts/test-workstation-contracts.py
+
 # ── Quality gates ─────────────────────────────────────────────────────────────
 .PHONY: fmt
 fmt: ## Format all crates
@@ -93,13 +97,13 @@ secret-scan: ## Block obvious secrets in staged changes
 	@./.githooks/secret-scan.sh
 
 .PHONY: pre-commit
-pre-commit: fmt-check clippy secret-scan ## Fast gate run by the pre-commit hook
+pre-commit: fmt-check clippy secret-scan workstation-contract-check ## Fast gate run by the pre-commit hook
 
 .PHONY: pre-push
-pre-push: build test ## Gate run by the pre-push hook
+pre-push: build test workstation-contract-check ## Gate run by the pre-push hook
 
 .PHONY: ci-local
-ci-local: fmt-check clippy build test audit deny release-matrix-check helm-check ## Full local parity with the validate workflow plus release-shape checks
+ci-local: fmt-check clippy build test audit deny release-matrix-check helm-check workstation-contract-check ## Full local parity with the validate workflow plus release-shape checks
 
 # ── Git hooks ─────────────────────────────────────────────────────────────────
 .PHONY: hooks
