@@ -395,9 +395,13 @@ def main():
         clipboard = text_json(call_tool(mcp, "get_clipboard"))
         if clipboard.get("text") != "wmng clipboard smoke":
             raise RuntimeError("clipboard round-trip failed: {}".format(clipboard))
-        idle = text_json(call_tool(mcp, "wait_for_idle", {"quiet_ms": 100, "timeout_ms": 1000}))
-        if "idle" not in idle:
-            raise RuntimeError("wait_for_idle returned malformed payload: {}".format(idle))
+        idle = text_json(call_tool(mcp, "wait_for_idle", {
+            "quiet_ms": 100,
+            "timeout_ms": 1000,
+            "window": window_id,
+        }))
+        if not idle.get("idle") or idle.get("window") != window_id or not idle.get("scope"):
+            raise RuntimeError("scoped wait_for_idle did not settle: {}".format(idle))
         first_delta = next_delta(mcp, screen_area, window_id)
 
         screenshot_bytes = image_size(call_tool(mcp, "screenshot"))
