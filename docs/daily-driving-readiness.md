@@ -102,6 +102,12 @@ default so real desktop clients do not drop or reorder a zero-delay burst. A
 caller may set `interval_ms` from 1 through 100 for a slower target; values
 outside that bounded range fail as invalid parameters.
 
+Pointer clicks flush the press, hold it for 12 milliseconds, then flush the
+release. Absolute clicks also allow 12 milliseconds for pointer focus/hover to
+settle, and multi-clicks use an 80 millisecond inter-click gap. These small
+delivery intervals keep GTK and Xaw controls from dropping a zero-duration
+XTEST click while preserving the existing MCP payload.
+
 On a daily-driver desktop, scope `wait_for_idle` to the target `window` or a
 root-coordinate `region`. Root-wide waiting remains available for quiet test
 desktops, but unrelated clocks, dashboards, and other monitors can keep the

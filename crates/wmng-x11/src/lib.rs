@@ -40,6 +40,9 @@ use x11rb::rust_connection::RustConnection;
 
 const SHM_EXT: &str = "MIT-SHM";
 const KEYSYM_SHIFT_L: u32 = 0xffe1;
+const CLICK_HOLD: Duration = Duration::from_millis(12);
+const POINTER_SETTLE: Duration = Duration::from_millis(12);
+const MULTI_CLICK_GAP: Duration = Duration::from_millis(80);
 
 /// A connection to the X server plus the cached state the companions need.
 pub struct X {
@@ -197,21 +200,30 @@ impl X {
     /// Press and release a pointer button (1=left, 2=middle, 3=right) at the
     /// current pointer position.
     pub fn click(&self, button: u8) -> Result<()> {
-        self.button(button, true)?;
-        self.button(button, false)?;
-        self.conn.flush()?;
+        self.click_count(button, 1)
+    }
+
+    /// Click a pointer button one or more times with delivery-safe timing.
+    pub fn click_count(&self, button: u8, count: u8) -> Result<()> {
+        let count = count.max(1);
+        for index in 0..count {
+            self.button(button, true)?;
+            self.conn.flush()?;
+            std::thread::sleep(CLICK_HOLD);
+            self.button(button, false)?;
+            self.conn.flush()?;
+            if index + 1 < count {
+                std::thread::sleep(MULTI_CLICK_GAP);
+            }
+        }
         Ok(())
     }
 
     /// Move the pointer, then click one or more times.
     pub fn click_at(&self, x: i16, y: i16, button: u8, count: u8) -> Result<()> {
         self.move_pointer(x, y)?;
-        for _ in 0..count.max(1) {
-            self.button(button, true)?;
-            self.button(button, false)?;
-        }
-        self.conn.flush()?;
-        Ok(())
+        std::thread::sleep(POINTER_SETTLE);
+        self.click_count(button, count)
     }
 
     /// Press or release a single pointer button.
