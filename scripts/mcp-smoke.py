@@ -152,6 +152,72 @@ def launch_client(display, title):
     raise RuntimeError("no disposable X client found; install xclock, xterm, or zenity")
 
 
+def launch_exact_input_client(display, title, result_path):
+    if not shutil.which("xterm"):
+        return None
+    argv = [
+        "xterm", "-T", title, "-n", title, "-geometry", "72x8+640+120",
+        "-e", "sh", "-c",
+        'IFS= read -r line; printf "%s" "$line" > "$1"; sleep 120',
+        "wmng-mcp-exact-input", result_path,
+    ]
+    return subprocess.Popen(argv, env=dict(os.environ, DISPLAY=display))
+
+
+def assert_exact_input(mcp, display, timeout):
+    title = "wmng-mcp-exact-input"
+    result_path = "/tmp/wmng-mcp-exact-input-{}.txt".format(os.getpid())
+    try:
+        os.unlink(result_path)
+    except FileNotFoundError:
+        pass
+    client = launch_exact_input_client(display, title, result_path)
+    if client is None:
+        print("exact input smoke skipped: xterm is unavailable", file=sys.stderr)
+        return None
+    sentinel = "Wmng_Input-96 /tmp/Exact <>!?"
+    try:
+        window = find_window(mcp, title, timeout)
+        call_tool(mcp, "focus", {"window": window["id"]})
+        time.sleep(0.25)
+        call_tool(mcp, "click", {
+            "x": window["x"] + window["width"] // 2,
+            "y": window["y"] + window["height"] // 2,
+            "button": 1,
+            "count": 1,
+        })
+        time.sleep(0.25)
+        call_tool(mcp, "type", {"text": sentinel})
+        call_tool(mcp, "key", {"key": "Return"})
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with open(result_path, "r", encoding="utf-8") as result:
+                    delivered = result.read()
+            except FileNotFoundError:
+                delivered = None
+            if delivered is not None:
+                if delivered != sentinel:
+                    raise RuntimeError(
+                        "exact input mismatch: expected {!r}, received {!r}".format(
+                            sentinel, delivered
+                        )
+                    )
+                return delivered
+            time.sleep(0.05)
+        raise RuntimeError("exact input smoke timed out")
+    finally:
+        client.terminate()
+        try:
+            client.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            client.kill()
+        try:
+            os.unlink(result_path)
+        except FileNotFoundError:
+            pass
+
+
 def find_window(mcp, title, timeout):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -241,6 +307,8 @@ def main():
     parser.add_argument("--ai-mcp", default="./target/debug/ai-mcp")
     parser.add_argument("--fast-delta", action="store_true",
                         help="also exercise changed_regions_fast; PNG dirty deltas stay the default model-facing lane")
+    parser.add_argument("--exact-input-only", action="store_true",
+                        help="run only the byte-for-byte XTerm typing gate")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--title", default="wmng-mcp-smoke")
     args = parser.parse_args()
@@ -266,6 +334,13 @@ def main():
         missing = sorted(REQUIRED_TOOLS - names)
         if missing:
             raise RuntimeError("missing MCP tools: {}".format(", ".join(missing)))
+
+        exact_input = assert_exact_input(mcp, args.display, args.timeout)
+        if args.exact_input_only:
+            if exact_input is None:
+                raise RuntimeError("exact input smoke requires xterm")
+            print("mcp exact input ok display={} text={!r}".format(args.display, exact_input))
+            return 0
 
         first = text_json(call_tool(mcp, "changed_regions"))
         if first["kind"] != "keyframe" or not first.get("regions"):
@@ -331,10 +406,11 @@ def main():
         fast_delta = next_fast_delta(mcp, screen_area, window_id) if args.fast_delta else None
 
         print(
-            "mcp smoke ok display={} protocol={} window=0x{:x} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} accessibility_nodes={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
+            "mcp smoke ok display={} protocol={} window=0x{:x} exact_input={} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} accessibility_nodes={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
                 args.display,
                 init.get("protocolVersion", "<unknown>"),
                 window_id,
+                exact_input is not None,
                 len(first["regions"]),
                 len(first_delta["regions"]),
                 sum(len(region.get("png_base64", "")) for region in first_delta.get("regions", [])),

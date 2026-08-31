@@ -36,6 +36,8 @@ use wmng_x11::{DamageFeed, MonitorInfo, SharedCapture, X};
 
 const BROWSER_ADAPTER_SCHEMA_VERSION: u16 = 1;
 const DEFAULT_BROWSER_SOCKET_NAME: &str = "wmaker-ai/browser-adapter.sock";
+const DEFAULT_TYPE_INTERVAL_MS: u64 = 12;
+const MAX_TYPE_INTERVAL_MS: u64 = 100;
 
 /// The MCP server: holds the shared X connection. Cheap to clone (Arc).
 #[derive(Clone)]
@@ -105,6 +107,8 @@ struct Drag {
 #[derive(Deserialize, JsonSchema)]
 struct TypeText {
     text: String,
+    /// Milliseconds between characters. Defaults to 12 and is bounded to 1..=100.
+    interval_ms: Option<u64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -562,13 +566,22 @@ impl WmCtl {
         .await
     }
 
-    #[tool(name = "type", description = "Type a string of text.")]
+    #[tool(
+        name = "type",
+        description = "Type text with delivery-safe XTEST pacing (12 ms between characters by default)."
+    )]
     async fn type_text(
         &self,
         Parameters(p): Parameters<TypeText>,
     ) -> Result<Json<Status>, ErrorData> {
+        let interval = type_interval(p.interval_ms)?;
         let x = self.x.clone();
-        run(move || x.type_text(&p.text).map(|_| ok()).map_err(to_err)).await
+        run(move || {
+            x.type_text_with_interval(&p.text, interval)
+                .map(|_| ok())
+                .map_err(to_err)
+        })
+        .await
     }
 
     #[tool(description = "Tap a key by X keysym or friendly key name.")]
@@ -1321,6 +1334,17 @@ fn command_with_resolved_assets(command: &str, args: &[String]) -> (String, Vec<
 
 fn to_err<E: std::fmt::Display>(e: E) -> ErrorData {
     ErrorData::internal_error(e.to_string(), None)
+}
+
+fn type_interval(interval_ms: Option<u64>) -> Result<Duration, ErrorData> {
+    let interval_ms = interval_ms.unwrap_or(DEFAULT_TYPE_INTERVAL_MS);
+    if !(1..=MAX_TYPE_INTERVAL_MS).contains(&interval_ms) {
+        return Err(ErrorData::invalid_params(
+            format!("interval_ms must be between 1 and {MAX_TYPE_INTERVAL_MS}"),
+            None,
+        ));
+    }
+    Ok(Duration::from_millis(interval_ms))
 }
 
 fn lock_err<T>(e: PoisonError<T>) -> ErrorData {
@@ -2210,6 +2234,20 @@ fn diff_config_from_env() -> DiffConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn type_interval_is_safe_and_bounded() {
+        assert_eq!(
+            type_interval(None).expect("default interval"),
+            Duration::from_millis(DEFAULT_TYPE_INTERVAL_MS)
+        );
+        assert_eq!(
+            type_interval(Some(MAX_TYPE_INTERVAL_MS)).expect("maximum interval"),
+            Duration::from_millis(MAX_TYPE_INTERVAL_MS)
+        );
+        assert!(type_interval(Some(0)).is_err());
+        assert!(type_interval(Some(MAX_TYPE_INTERVAL_MS + 1)).is_err());
+    }
 
     fn rect(x: i32, y: i32, width: u32, height: u32) -> RectOut {
         RectOut {

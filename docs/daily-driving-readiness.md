@@ -97,6 +97,11 @@ WMAKER_AI_MAX_DIRTY_RATIO=0.35
 WMAKER_AI_MAX_DIRTY_REGIONS=16
 ```
 
+The `type` tool paces XTEST delivery at 12 milliseconds between characters by
+default so real desktop clients do not drop or reorder a zero-delay burst. A
+caller may set `interval_ms` from 1 through 100 for a slower target; values
+outside that bounded range fail as invalid parameters.
+
 Daily-driver defaults should favor bounded payloads over perfect compression.
 If the XDamage feed reports too many regions, the protocol coalesces them into a
 bounded dirty crop and only emits a keyframe when the coalesced dirty area is too
@@ -121,6 +126,8 @@ The smoke script launches the first available disposable X client from
 5. `screenshot` returns `image/png`.
 6. `changed_regions` first returns a keyframe, then returns smaller deltas after
    visible window movement.
+7. When XTerm is available, `type` delivers a mixed-case punctuation sentinel
+   byte-for-byte to a disposable client.
 
 ## Measurement Loop
 

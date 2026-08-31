@@ -25,6 +25,7 @@ pub use error::{Error, Result};
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use x11rb::connection::{Connection, RequestConnection as _};
 use x11rb::protocol::damage::ConnectionExt as _;
@@ -321,8 +322,21 @@ impl X {
     /// Type a string. ASCII/Latin-1 characters map to keysyms directly; an
     /// unmapped character yields [`Error::NoKeycode`].
     pub fn type_text(&self, text: &str) -> Result<()> {
-        for ch in text.chars() {
+        self.type_text_with_interval(text, Duration::from_millis(12))
+    }
+
+    /// Type a string with a delivery interval between characters.
+    ///
+    /// Real desktop clients can drop or reorder an unpaced burst of XTEST key
+    /// events even when the X server accepts every request. The caller chooses
+    /// the interval so protocol boundaries can validate and bound it.
+    pub fn type_text_with_interval(&self, text: &str, interval: Duration) -> Result<()> {
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
             self.key(ch as u32)?;
+            if chars.peek().is_some() && !interval.is_zero() {
+                std::thread::sleep(interval);
+            }
         }
         Ok(())
     }
