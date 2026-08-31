@@ -549,12 +549,7 @@ impl WmCtl {
         run(move || {
             match (p.x, p.y) {
                 (Some(px), Some(py)) => x.click_at(px, py, p.button, p.count),
-                _ => {
-                    for _ in 0..p.count.max(1) {
-                        x.click(p.button).map_err(to_err)?;
-                    }
-                    Ok(())
-                }
+                _ => x.click_count(p.button, p.count),
             }
             .map(|_| ok())
             .map_err(to_err)

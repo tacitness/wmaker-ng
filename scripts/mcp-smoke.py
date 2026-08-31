@@ -218,6 +218,50 @@ def assert_exact_input(mcp, display, timeout):
             pass
 
 
+def launch_exact_click_client(display, title):
+    if not shutil.which("xmessage"):
+        return None
+    argv = [
+        "xmessage", "-name", title, "-title", title,
+        "-buttons", "Activate:0", "-default", "Activate",
+        "-geometry", "360x160+760+120", "MCP click activation",
+    ]
+    return subprocess.Popen(argv, env=dict(os.environ, DISPLAY=display))
+
+
+def assert_exact_click(mcp, display, timeout):
+    title = "wmng-mcp-exact-click"
+    client = launch_exact_click_client(display, title)
+    if client is None:
+        print("exact click smoke skipped: xmessage is unavailable", file=sys.stderr)
+        return None
+    try:
+        window = find_window(mcp, title, timeout)
+        call_tool(mcp, "focus", {"window": window["id"]})
+        time.sleep(0.25)
+        call_tool(mcp, "click", {
+            # xmessage lays its single action button out at bottom-left.
+            "x": window["x"] + 45,
+            "y": window["y"] + window["height"] - 18,
+            "button": 1,
+            "count": 1,
+        })
+        try:
+            status = client.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("exact click smoke did not activate the X11 button") from error
+        if status != 0:
+            raise RuntimeError("exact click client exited with status {}".format(status))
+        return True
+    finally:
+        if client.poll() is None:
+            client.terminate()
+            try:
+                client.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                client.kill()
+
+
 def find_window(mcp, title, timeout):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -309,6 +353,8 @@ def main():
                         help="also exercise changed_regions_fast; PNG dirty deltas stay the default model-facing lane")
     parser.add_argument("--exact-input-only", action="store_true",
                         help="run only the byte-for-byte XTerm typing gate")
+    parser.add_argument("--exact-click-only", action="store_true",
+                        help="run only the X11 button activation gate")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--title", default="wmng-mcp-smoke")
     args = parser.parse_args()
@@ -335,12 +381,21 @@ def main():
         if missing:
             raise RuntimeError("missing MCP tools: {}".format(", ".join(missing)))
 
+        if args.exact_click_only:
+            exact_click = assert_exact_click(mcp, args.display, args.timeout)
+            if exact_click is None:
+                raise RuntimeError("exact click smoke requires xmessage")
+            print("mcp exact click ok display={}".format(args.display))
+            return 0
+
         exact_input = assert_exact_input(mcp, args.display, args.timeout)
         if args.exact_input_only:
             if exact_input is None:
                 raise RuntimeError("exact input smoke requires xterm")
             print("mcp exact input ok display={} text={!r}".format(args.display, exact_input))
             return 0
+
+        exact_click = assert_exact_click(mcp, args.display, args.timeout)
 
         first = text_json(call_tool(mcp, "changed_regions"))
         if first["kind"] != "keyframe" or not first.get("regions"):
@@ -410,11 +465,12 @@ def main():
         fast_delta = next_fast_delta(mcp, screen_area, window_id) if args.fast_delta else None
 
         print(
-            "mcp smoke ok display={} protocol={} window=0x{:x} exact_input={} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} accessibility_nodes={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
+            "mcp smoke ok display={} protocol={} window=0x{:x} exact_input={} exact_click={} keyframe_regions={} delta_regions={} delta_png_b64_bytes={} delta_call_ms={} accessibility_nodes={} screenshot_b64_bytes={} fast_delta={} fast_regions={} fast_b64_bytes={} fast_call_ms={} fast_total_ms={} fast_capture_ms={} fast_encode_ms={}".format(
                 args.display,
                 init.get("protocolVersion", "<unknown>"),
                 window_id,
                 exact_input is not None,
+                exact_click is not None,
                 len(first["regions"]),
                 len(first_delta["regions"]),
                 sum(len(region.get("png_base64", "")) for region in first_delta.get("regions", [])),
