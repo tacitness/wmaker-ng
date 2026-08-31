@@ -488,6 +488,10 @@ struct WaitForIdle {
     quiet_ms: u64,
     /// Maximum time to wait.
     timeout_ms: u64,
+    /// Optional managed top-level window whose root-coordinate bounds define the scope.
+    window: Option<u32>,
+    /// Optional root-coordinate scope. Mutually exclusive with window.
+    region: Option<RectOut>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -495,6 +499,15 @@ struct WaitForIdleOut {
     idle: bool,
     elapsed_ms: u128,
     damage_events: usize,
+    ignored_damage_events: usize,
+    scope: RectOut,
+    window: Option<u32>,
+}
+
+struct IdleScope {
+    root_scope: RectOut,
+    event_scope: RectOut,
+    damage_window: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1117,30 +1130,58 @@ impl WmCtl {
         .await
     }
 
-    #[tool(description = "Wait until XDamage has been quiet for quiet_ms, or timeout_ms expires.")]
+    #[tool(
+        description = "Wait until XDamage is quiet for quiet_ms, optionally scoped to one window or root-coordinate region."
+    )]
     async fn wait_for_idle(
         &self,
         Parameters(p): Parameters<WaitForIdle>,
     ) -> Result<Json<WaitForIdleOut>, ErrorData> {
         let damage = self.damage.clone();
+        let x = self.x.clone();
         run(move || {
+            let scope = resolve_idle_scope(&x, p.window, p.region)?;
+            let scoped_damage = scope
+                .damage_window
+                .map(|window| DamageFeed::new_for_window(x.clone(), window).map_err(to_err))
+                .transpose()?;
             let quiet = Duration::from_millis(p.quiet_ms.max(1));
             let timeout = Duration::from_millis(p.timeout_ms.max(p.quiet_ms).max(1));
             let start = Instant::now();
             let mut quiet_since = Instant::now();
             let mut events = 0usize;
+            let mut ignored_events = 0usize;
             while start.elapsed() < timeout {
-                let rects = damage.lock().map_err(lock_err)?.poll().map_err(to_err)?;
-                if rects.is_empty() {
+                let rects = match &scoped_damage {
+                    Some(scoped_damage) => scoped_damage.poll().map_err(to_err)?,
+                    None => damage.lock().map_err(lock_err)?.poll().map_err(to_err)?,
+                };
+                let scoped_events = rects
+                    .iter()
+                    .filter(|rect| {
+                        damage_intersects_scope(
+                            i32::from(rect.x),
+                            i32::from(rect.y),
+                            u32::from(rect.width),
+                            u32::from(rect.height),
+                            &scope.event_scope,
+                        )
+                    })
+                    .count();
+                ignored_events += rects.len().saturating_sub(scoped_events);
+                if scoped_events == 0 {
                     if quiet_since.elapsed() >= quiet {
                         return Ok(Json(WaitForIdleOut {
                             idle: true,
                             elapsed_ms: start.elapsed().as_millis(),
                             damage_events: events,
+                            ignored_damage_events: ignored_events,
+                            scope: scope.root_scope.clone(),
+                            window: scope.damage_window,
                         }));
                     }
                 } else {
-                    events += rects.len();
+                    events += scoped_events;
                     quiet_since = Instant::now();
                 }
                 std::thread::sleep(Duration::from_millis(25));
@@ -1149,6 +1190,9 @@ impl WmCtl {
                 idle: false,
                 elapsed_ms: start.elapsed().as_millis(),
                 damage_events: events,
+                ignored_damage_events: ignored_events,
+                scope: scope.root_scope,
+                window: scope.damage_window,
             }))
         })
         .await
@@ -1345,6 +1389,169 @@ fn type_interval(interval_ms: Option<u64>) -> Result<Duration, ErrorData> {
         ));
     }
     Ok(Duration::from_millis(interval_ms))
+}
+
+fn resolve_idle_scope(
+    x: &X,
+    window: Option<u32>,
+    region: Option<RectOut>,
+) -> Result<IdleScope, ErrorData> {
+    if window.is_some() && region.is_some() {
+        return Err(ErrorData::invalid_params(
+            "wait_for_idle accepts either window or region, not both",
+            None,
+        ));
+    }
+    let (screen_width, screen_height) = x.dimensions();
+    if let Some(window) = window {
+        let info = Ewmh::new(x)
+            .map_err(to_err)?
+            .list_windows()
+            .map_err(to_err)?
+            .into_iter()
+            .find(|candidate| candidate.id == window)
+            .ok_or_else(|| ErrorData::invalid_params("target window not found", None))?;
+        if !info.mapped || info.width == 0 || info.height == 0 {
+            return Err(ErrorData::invalid_params(
+                "target window is not visibly mapped",
+                None,
+            ));
+        }
+        let scope = clip_idle_region(
+            RectOut {
+                x: i32::from(info.x),
+                y: i32::from(info.y),
+                width: u32::from(info.width),
+                height: u32::from(info.height),
+            },
+            screen_width,
+            screen_height,
+        )
+        .ok_or_else(|| ErrorData::invalid_params("target window is outside the root", None))?;
+        return Ok(IdleScope {
+            root_scope: scope.clone(),
+            event_scope: RectOut {
+                x: scope.x - i32::from(info.x),
+                y: scope.y - i32::from(info.y),
+                width: scope.width,
+                height: scope.height,
+            },
+            damage_window: Some(window),
+        });
+    }
+    if let Some(region) = region {
+        let root_scope = validate_idle_region(region, screen_width, screen_height)?;
+        let ewmh = Ewmh::new(x).map_err(to_err)?;
+        let windows = ewmh.list_windows().map_err(to_err)?;
+        let stacking = ewmh.stacking_windows().map_err(to_err)?;
+        let info = stacking
+            .iter()
+            .rev()
+            .filter_map(|id| windows.iter().find(|candidate| candidate.id == *id))
+            .find(|candidate| {
+                candidate.mapped
+                    && !candidate.minimized
+                    && candidate.width > 0
+                    && candidate.height > 0
+                    && rect_contains(
+                        &RectOut {
+                            x: i32::from(candidate.x),
+                            y: i32::from(candidate.y),
+                            width: u32::from(candidate.width),
+                            height: u32::from(candidate.height),
+                        },
+                        &root_scope,
+                    )
+            })
+            .ok_or_else(|| {
+                ErrorData::invalid_params(
+                    "wait_for_idle region must fit within one mapped top-level window",
+                    None,
+                )
+            })?;
+        return Ok(IdleScope {
+            root_scope: root_scope.clone(),
+            event_scope: RectOut {
+                x: root_scope.x - i32::from(info.x),
+                y: root_scope.y - i32::from(info.y),
+                width: root_scope.width,
+                height: root_scope.height,
+            },
+            damage_window: Some(info.id),
+        });
+    }
+    let root_scope = RectOut {
+        x: 0,
+        y: 0,
+        width: u32::from(screen_width),
+        height: u32::from(screen_height),
+    };
+    Ok(IdleScope {
+        root_scope: root_scope.clone(),
+        event_scope: root_scope,
+        damage_window: None,
+    })
+}
+
+fn rect_contains(outer: &RectOut, inner: &RectOut) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && rect_right(inner) <= rect_right(outer)
+        && rect_bottom(inner) <= rect_bottom(outer)
+}
+
+fn validate_idle_region(
+    region: RectOut,
+    screen_width: u16,
+    screen_height: u16,
+) -> Result<RectOut, ErrorData> {
+    if region.width == 0 || region.height == 0 {
+        return Err(ErrorData::invalid_params(
+            "wait_for_idle region must have non-zero width and height",
+            None,
+        ));
+    }
+    let right = i64::from(region.x) + i64::from(region.width);
+    let bottom = i64::from(region.y) + i64::from(region.height);
+    if region.x < 0
+        || region.y < 0
+        || right > i64::from(screen_width)
+        || bottom > i64::from(screen_height)
+    {
+        return Err(ErrorData::invalid_params(
+            "wait_for_idle region must be inside the root bounds",
+            None,
+        ));
+    }
+    Ok(region)
+}
+
+fn clip_idle_region(region: RectOut, screen_width: u16, screen_height: u16) -> Option<RectOut> {
+    let left = i64::from(region.x).max(0);
+    let top = i64::from(region.y).max(0);
+    let right = (i64::from(region.x) + i64::from(region.width)).min(i64::from(screen_width));
+    let bottom = (i64::from(region.y) + i64::from(region.height)).min(i64::from(screen_height));
+    if right <= left || bottom <= top {
+        return None;
+    }
+    Some(RectOut {
+        x: i32::try_from(left).ok()?,
+        y: i32::try_from(top).ok()?,
+        width: u32::try_from(right - left).ok()?,
+        height: u32::try_from(bottom - top).ok()?,
+    })
+}
+
+fn damage_intersects_scope(x: i32, y: i32, width: u32, height: u32, scope: &RectOut) -> bool {
+    intersection_area(
+        &RectOut {
+            x,
+            y,
+            width,
+            height,
+        },
+        scope,
+    ) > 0
 }
 
 fn lock_err<T>(e: PoisonError<T>) -> ErrorData {
@@ -2247,6 +2454,34 @@ mod tests {
         );
         assert!(type_interval(Some(0)).is_err());
         assert!(type_interval(Some(MAX_TYPE_INTERVAL_MS + 1)).is_err());
+    }
+
+    #[test]
+    fn idle_regions_validate_and_clip_to_root() {
+        let valid =
+            validate_idle_region(rect(10, 20, 300, 200), 1280, 720).expect("region inside root");
+        assert_eq!(valid.x, 10);
+        assert_eq!(valid.width, 300);
+        assert!(validate_idle_region(rect(-1, 20, 300, 200), 1280, 720).is_err());
+        assert!(validate_idle_region(rect(1200, 20, 300, 200), 1280, 720).is_err());
+        assert!(validate_idle_region(rect(10, 20, 0, 200), 1280, 720).is_err());
+
+        let clipped = clip_idle_region(rect(-20, 700, 100, 100), 1280, 720)
+            .expect("partially visible window clips");
+        assert_eq!(clipped.x, 0);
+        assert_eq!(clipped.y, 700);
+        assert_eq!(clipped.width, 80);
+        assert_eq!(clipped.height, 20);
+        assert!(clip_idle_region(rect(1400, 800, 100, 100), 1280, 720).is_none());
+    }
+
+    #[test]
+    fn damage_filter_ignores_events_outside_scope() {
+        let scope = rect(100, 100, 400, 300);
+        assert!(damage_intersects_scope(120, 140, 10, 10, &scope));
+        assert!(damage_intersects_scope(90, 90, 20, 20, &scope));
+        assert!(!damage_intersects_scope(0, 0, 50, 50, &scope));
+        assert!(!damage_intersects_scope(500, 100, 10, 10, &scope));
     }
 
     fn rect(x: i32, y: i32, width: u32, height: u32) -> RectOut {

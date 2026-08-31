@@ -19,9 +19,16 @@ pub struct DamageFeed {
 
 impl DamageFeed {
     pub fn new(x: Arc<X>) -> Result<Self> {
+        let root = x.root();
+        Self::new_for_window(x, root)
+    }
+
+    /// Subscribe to damage for one specific X window.
+    pub fn new_for_window(x: Arc<X>, window: u32) -> Result<Self> {
         let damage = x.conn().generate_id()?;
         x.conn()
-            .damage_create(damage, x.root(), ReportLevel::DELTA_RECTANGLES)?;
+            .damage_create(damage, window, ReportLevel::DELTA_RECTANGLES)?
+            .check()?;
         x.conn().flush()?;
         Ok(Self { x, damage })
     }
@@ -30,7 +37,9 @@ impl DamageFeed {
     pub fn poll(&self) -> Result<Vec<Rectangle>> {
         let mut rects = Vec::new();
         while let Some(event) = self.x.conn().poll_for_event()? {
-            if let Event::DamageNotify(n) = event {
+            if let Event::DamageNotify(n) = event
+                && n.damage == self.damage
+            {
                 rects.push(n.area);
             }
         }

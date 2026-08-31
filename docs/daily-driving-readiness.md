@@ -102,6 +102,14 @@ default so real desktop clients do not drop or reorder a zero-delay burst. A
 caller may set `interval_ms` from 1 through 100 for a slower target; values
 outside that bounded range fail as invalid parameters.
 
+On a daily-driver desktop, scope `wait_for_idle` to the target `window` or a
+root-coordinate `region`. Root-wide waiting remains available for quiet test
+desktops, but unrelated clocks, dashboards, and other monitors can keep the
+root damage stream active indefinitely. Scoped responses report both matching
+and ignored damage-event counts. A root-coordinate region must fit within one
+mapped top-level window so the server can bind a dedicated per-window XDamage
+subscription instead of trusting compositor-wide root damage.
+
 Daily-driver defaults should favor bounded payloads over perfect compression.
 If the XDamage feed reports too many regions, the protocol coalesces them into a
 bounded dirty crop and only emits a keyframe when the coalesced dirty area is too
